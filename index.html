@@ -9,7 +9,7 @@
 <meta name="apple-mobile-web-app-title" content="FleteRuta"/>
 <title>FleteRuta 🚛</title>
 <link rel="preconnect" href="https://fonts.googleapis.com"/>
-<link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <link rel="stylesheet" href="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.css"/>
 <style>
@@ -18,8 +18,8 @@ html,body,#root{height:100%;background:#0f1c2e}
 body{font-family:'DM Sans',sans-serif;overscroll-behavior:none}
 input,textarea,button,select{font-family:'DM Sans',sans-serif}
 .leaflet-routing-container{display:none!important}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.5}}
-@keyframes gpspulse{0%{box-shadow:0 0 0 0 rgba(0,200,150,0.5)}70%{box-shadow:0 0 0 12px rgba(0,200,150,0)}100%{box-shadow:0 0 0 0 rgba(0,200,150,0)}}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes glow{0%,100%{box-shadow:0 0 0 0 rgba(0,200,150,0.5)}70%{box-shadow:0 0 0 10px rgba(0,200,150,0)}}
 </style>
 </head>
 <body>
@@ -28,50 +28,47 @@ input,textarea,button,select{font-family:'DM Sans',sans-serif}
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://unpkg.com/leaflet-routing-machine@3.2.12/dist/leaflet-routing-machine.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script>
-window.addEventListener('load', function() {
-const {useState,useEffect,useRef,useCallback}=React;
+window.addEventListener('load',function(){
 
-// ── COLORES ──────────────────────────────────────────────────────────────────
-const C={
-  bg:'#0f1c2e',surface:'#162336',card:'#1e3148',
-  border:'rgba(255,255,255,0.08)',
-  accent:'#00c896',sky:'#3b82f6',warn:'#f59e0b',danger:'#ef4444',
-  text:'#f0f4f8',muted:'#94a3b8',dim:'#4a6080'
-};
+// ── FIREBASE ─────────────────────────────────────────────────────────────────
+firebase.initializeApp({
+  apiKey:"AIzaSyDBpTLWkYT5jxW71o6gJjQYCiG-zYlTKMA",
+  authDomain:"retirodefinitivofleteros.firebaseapp.com",
+  projectId:"retirodefinitivofleteros",
+  storageBucket:"retirodefinitivofleteros.firebasestorage.app",
+  messagingSenderId:"109493302154",
+  appId:"1:109493302154:web:ec1c4be9b9e9973f34ce73"
+});
+const db=firebase.firestore();
 
-// ── DATOS ─────────────────────────────────────────────────────────────────────
+// ── CONSTANTES ────────────────────────────────────────────────────────────────
+const C={bg:'#0f1c2e',surface:'#162336',card:'#1e3148',border:'rgba(255,255,255,0.08)',accent:'#00c896',sky:'#3b82f6',warn:'#f59e0b',danger:'#ef4444',text:'#f0f4f8',muted:'#94a3b8',dim:'#4a6080'};
+const FLETEROS=[{id:'jorge',nombre:'Jorge',avatar:'JO'},{id:'jorgejr',nombre:'Jorge Jr',avatar:'JJ'},{id:'jonathan',nombre:'Jonathan',avatar:'JN'}];
 const uid=()=>Math.random().toString(36).slice(2,9);
-const FLETEROS=[
-  {id:'f1',nombre:'Juan Rodríguez',patente:'ABC 123',vehiculo:'Renault Master',avatar:'JR'},
-  {id:'f2',nombre:'Carlos Pereyra',patente:'XYZ 456',vehiculo:'Fiat Ducato',avatar:'CP'},
-];
-const PEDIDOS_INIT=[
-  {id:'p1',direccion:'Av. Colón 1234',cliente:'García',bultos:3,obs:'Timbre roto',status:'pendiente'},
-  {id:'p2',direccion:'Bv. San Juan 560',cliente:'Martínez',bultos:1,obs:'',status:'pendiente'},
-  {id:'p3',direccion:'Dean Funes 890',cliente:'López',bultos:5,obs:'Dejar en portería',status:'pendiente'},
-  {id:'p4',direccion:'Av. Vélez Sársfield 2100',cliente:'Romero',bultos:2,obs:'',status:'pendiente'},
-];
+const {useState,useEffect,useRef}=React;
 
-// ── ESTILOS BASE ──────────────────────────────────────────────────────────────
+// ── ESTILOS ───────────────────────────────────────────────────────────────────
 const A={minHeight:'100dvh',background:C.bg,color:C.text,display:'flex',flexDirection:'column'};
-const topbarS={background:C.surface,borderBottom:`1px solid ${C.border}`,padding:'0 16px',height:56,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:50,flexShrink:0};
-const scrollS={flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px 16px 40px',display:'flex',flexDirection:'column',gap:12};
-const cardS={background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:'14px 16px'};
-const inp={width:'100%',padding:'12px 14px',background:'rgba(255,255,255,0.06)',border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:16,outline:'none'};
-const btn=(bg,fg=C.bg)=>({width:'100%',padding:'14px',background:bg,color:fg,border:'none',borderRadius:12,fontSize:15,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8,minHeight:48});
-const bdg=(bg,c)=>({fontSize:11,padding:'3px 10px',borderRadius:20,background:bg,color:c,fontWeight:600,whiteSpace:'nowrap'});
-const lbl={fontSize:12,color:C.muted,marginBottom:6,display:'block',fontWeight:500};
-const row={display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10};
-const cardTitle={fontSize:11,fontWeight:700,color:C.dim,textTransform:'uppercase',letterSpacing:1,marginBottom:14};
+const TB={background:C.surface,borderBottom:`1px solid ${C.border}`,padding:'0 16px',height:56,display:'flex',alignItems:'center',justifyContent:'space-between',position:'sticky',top:0,zIndex:50,flexShrink:0};
+const SC={flex:1,overflowY:'auto',WebkitOverflowScrolling:'touch',padding:'16px 16px 40px',display:'flex',flexDirection:'column',gap:12};
+const CD={background:C.card,border:`1px solid ${C.border}`,borderRadius:16,padding:'14px 16px'};
+const IN={width:'100%',padding:'12px 14px',background:'rgba(255,255,255,0.06)',border:`1px solid ${C.border}`,borderRadius:12,color:C.text,fontSize:16,outline:'none'};
+const BT=(bg,fg=C.bg)=>({width:'100%',padding:'14px',background:bg,color:fg,border:'none',borderRadius:12,fontSize:15,fontWeight:700,cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',gap:8,minHeight:48});
+const BG=(bg,c)=>({fontSize:11,padding:'3px 10px',borderRadius:20,background:bg,color:c,fontWeight:600,whiteSpace:'nowrap'});
+const LB={fontSize:12,color:C.muted,marginBottom:6,display:'block',fontWeight:500};
+const R2={display:'grid',gridTemplateColumns:'1fr 1fr',gap:10,marginBottom:10};
+const CT={fontSize:11,fontWeight:700,color:C.dim,textTransform:'uppercase',letterSpacing:1,marginBottom:14};
 
-// ── GEOCODIFICADOR ────────────────────────────────────────────────────────────
+// ── GEOCODE ───────────────────────────────────────────────────────────────────
 async function geocode(dir){
   try{
     const q=encodeURIComponent(dir+', Córdoba, Argentina');
     const r=await fetch(`https://nominatim.openstreetmap.org/search?q=${q}&format=json&limit=1`,{headers:{'Accept-Language':'es'}});
     const d=await r.json();
-    if(d.length===0)return null;
+    if(!d.length)return null;
     return{lat:parseFloat(d[0].lat),lng:parseFloat(d[0].lon)};
   }catch(e){return null;}
 }
@@ -79,29 +76,22 @@ async function geocode(dir){
 // ══════════════════════════════════════════════════════════════════════════════
 // MAPA
 // ══════════════════════════════════════════════════════════════════════════════
-function MapaRuta({paradas,pedidos,onClose}){
-  const mapDiv=useRef(null);
-  const mapRef=useRef(null);
-  const gpsRef=useRef(null);
-  const watchRef=useRef(null);
+function MapaRuta({paradas,pedidos,fleteroId,onClose}){
+  const mapDiv=useRef(null),mapRef=useRef(null),gpsMarker=useRef(null),otrosM=useRef({}),watchRef=useRef(null),wakeLock=useRef(null);
   const [cargando,setCargando]=useState(true);
   const [coords,setCoords]=useState([]);
   const [gpsOn,setGpsOn]=useState(false);
   const [gpsErr,setGpsErr]=useState('');
-  const [noGeo,setNoGeo]=useState(0);
 
-  // 1. Geocodificar
   useEffect(()=>{
     let vivo=true;
     (async()=>{
       const res=[];
       for(let i=0;i<paradas.length;i++){
-        const par=paradas[i];
-        const ped=pedidos.find(p=>p.id===par.pedidoId);
+        const par=paradas[i],ped=pedidos.find(p=>p.id===par.pedidoId);
         if(!ped)continue;
         const c=await geocode(ped.direccion);
         if(c)res.push({...c,idx:i,status:par.status,dir:ped.direccion,cliente:ped.cliente});
-        else setNoGeo(n=>n+1);
         if(i<paradas.length-1)await new Promise(r=>setTimeout(r,350));
       }
       if(vivo){setCoords(res);setCargando(false);}
@@ -109,153 +99,91 @@ function MapaRuta({paradas,pedidos,onClose}){
     return()=>{vivo=false};
   },[]);
 
-  // 2. Iniciar mapa
   useEffect(()=>{
-    if(cargando||coords.length===0||mapRef.current)return;
-
-    // Fix iconos Leaflet
+    if(cargando||!coords.length||mapRef.current)return;
     delete L.Icon.Default.prototype._getIconUrl;
-    L.Icon.Default.mergeOptions({
-      iconRetinaUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-      iconUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-      shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-    });
-
+    L.Icon.Default.mergeOptions({iconRetinaUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',iconUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',shadowUrl:'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png'});
     const map=L.map(mapDiv.current,{zoomControl:false}).setView([coords[0].lat,coords[0].lng],13);
     mapRef.current=map;
-
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map);
     L.control.zoom({position:'bottomright'}).addTo(map);
-
-    // Pines
     coords.forEach((c,i)=>{
       const col=c.status==='entregado'?C.accent:c.status==='problema'?C.danger:C.sky;
       const txt=c.status==='entregado'?'✓':c.status==='problema'?'!':String(c.idx+1);
-      const ico=L.divIcon({
-        className:'',
-        html:`<div style="width:34px;height:34px;border-radius:50% 50% 50% 0;background:${col};border:2.5px solid white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;transform:rotate(-45deg);box-shadow:0 3px 10px rgba(0,0,0,0.5)"><span style="transform:rotate(45deg)">${txt}</span></div>`,
-        iconSize:[34,34],iconAnchor:[17,34],popupAnchor:[0,-34]
-      });
-      L.marker([c.lat,c.lng],{icon:ico}).addTo(map)
-        .bindPopup(`<b>${c.idx+1}. ${c.dir}</b><br><small>${c.cliente} · ${c.status}</small>`);
+      L.marker([c.lat,c.lng],{icon:L.divIcon({className:'',html:`<div style="width:34px;height:34px;border-radius:50% 50% 50% 0;background:${col};border:2.5px solid white;display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;color:white;transform:rotate(-45deg);box-shadow:0 3px 10px rgba(0,0,0,0.5)"><span style="transform:rotate(45deg)">${txt}</span></div>`,iconSize:[34,34],iconAnchor:[17,34],popupAnchor:[0,-34]})}).addTo(map).bindPopup(`<b>${c.idx+1}. ${c.dir}</b><br><small>${c.cliente}</small>`);
     });
-
-    // Ruta por calles
     if(coords.length>1){
-      L.Routing.control({
-        waypoints:coords.map(c=>L.latLng(c.lat,c.lng)),
-        routeWhileDragging:false,
-        show:false,
-        addWaypoints:false,
-        draggableWaypoints:false,
-        fitSelectedRoutes:false,
-        lineOptions:{
-          styles:[
-            {color:'#000',opacity:0.15,weight:9},
-            {color:C.sky,opacity:0.9,weight:5},
-          ],
-          extendToWaypoints:true,
-          missingRouteTolerance:0
-        },
-        createMarker:()=>null
-      }).addTo(map);
+      L.Routing.control({waypoints:coords.map(c=>L.latLng(c.lat,c.lng)),routeWhileDragging:false,show:false,addWaypoints:false,draggableWaypoints:false,fitSelectedRoutes:false,
+        lineOptions:{styles:[{color:'#000',opacity:0.15,weight:9},{color:C.sky,opacity:0.9,weight:5}],extendToWaypoints:true,missingRouteTolerance:0},createMarker:()=>null}).addTo(map);
     }
-
-    const bounds=L.latLngBounds(coords.map(c=>[c.lat,c.lng]));
-    map.fitBounds(bounds,{padding:[50,50]});
-
-    return()=>{
-      if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);
-      map.remove();mapRef.current=null;
-    };
+    map.fitBounds(L.latLngBounds(coords.map(c=>[c.lat,c.lng])),{padding:[50,50]});
+    return()=>{if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);if(wakeLock.current)wakeLock.current.release().catch(()=>{});map.remove();mapRef.current=null;};
   },[cargando,coords]);
 
-  // 3. GPS robusto + Wake Lock
-  const wakeLockRef=useRef(null);
+  // Posiciones en tiempo real de todos los fleteros (visible en oficina y en el mapa de cada fletero)
+  useEffect(()=>{
+    if(cargando)return;
+    const unsub=db.collection('posiciones').onSnapshot(snap=>{
+      snap.forEach(doc=>{
+        if(doc.id===fleteroId)return; // el propio fletero se muestra con GPS local
+        const d=doc.data(),fl=FLETEROS.find(f=>f.id===doc.id);
+        if(!fl||!mapRef.current)return;
+        const icoHtml=`<div style="width:32px;height:32px;border-radius:50%;background:${C.warn};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;color:#1a1000;box-shadow:0 2px 8px rgba(0,0,0,0.4)">${fl.avatar}</div>`;
+        const ico=L.divIcon({className:'',html:icoHtml,iconSize:[32,32],iconAnchor:[16,16]});
+        if(otrosM.current[doc.id])otrosM.current[doc.id].setLatLng([d.lat,d.lng]);
+        else otrosM.current[doc.id]=L.marker([d.lat,d.lng],{icon:ico,zIndexOffset:900}).addTo(mapRef.current).bindPopup(`🚐 ${fl.nombre}`);
+      });
+    });
+    return()=>unsub();
+  },[cargando]);
 
   async function pedirWakeLock(){
-    try{
-      if('wakeLock' in navigator){
-        wakeLockRef.current=await navigator.wakeLock.request('screen');
-        wakeLockRef.current.addEventListener('release',()=>{
-          // si se libera (llamada, etc) lo pedimos de nuevo cuando vuelve el foco
-        });
-        document.addEventListener('visibilitychange',async()=>{
-          if(document.visibilityState==='visible'&&wakeLockRef.current){
-            try{wakeLockRef.current=await navigator.wakeLock.request('screen');}catch(e){}
-          }
-        });
-      }
-    }catch(e){console.warn('WakeLock no disponible:',e);}
+    try{if('wakeLock' in navigator){wakeLock.current=await navigator.wakeLock.request('screen');document.addEventListener('visibilitychange',async()=>{if(document.visibilityState==='visible')try{wakeLock.current=await navigator.wakeLock.request('screen');}catch(e){}});}}catch(e){}
   }
 
   function activarGPS(){
     if(!navigator.geolocation){setGpsErr('GPS no disponible en este dispositivo');return;}
     setGpsOn(true);setGpsErr('');
     pedirWakeLock();
-
     watchRef.current=navigator.geolocation.watchPosition(pos=>{
-      const{latitude:lat,longitude:lng,accuracy}=pos.coords;
+      const{latitude:lat,longitude:lng}=pos.coords;
       const map=mapRef.current;if(!map)return;
-      const icoHtml=`<div style="width:26px;height:26px;border-radius:50%;background:${C.accent};border:3px solid white;box-shadow:0 0 0 8px ${C.accent}30;"></div>`;
-      if(!gpsRef.current){
-        const ico=L.divIcon({className:'',html:icoHtml,iconSize:[26,26],iconAnchor:[13,13]});
-        gpsRef.current=L.marker([lat,lng],{icon:ico,zIndexOffset:1000}).addTo(map);
+      // Guardar posición en Firebase
+      if(fleteroId)db.collection('posiciones').doc(fleteroId).set({lat,lng,ts:firebase.firestore.FieldValue.serverTimestamp()});
+      const icoHtml=`<div style="width:26px;height:26px;border-radius:50%;background:${C.accent};border:3px solid white;box-shadow:0 0 0 8px ${C.accent}30;animation:glow 2s infinite"></div>`;
+      if(!gpsMarker.current){
+        gpsMarker.current=L.marker([lat,lng],{icon:L.divIcon({className:'',html:icoHtml,iconSize:[26,26],iconAnchor:[13,13]}),zIndexOffset:1000}).addTo(map);
         map.panTo([lat,lng],{animate:true});
-      }else{
-        gpsRef.current.setLatLng([lat,lng]);
-      }
+      }else gpsMarker.current.setLatLng([lat,lng]);
     },err=>{
-      if(err.code===1){
-        setGpsErr('Permiso GPS denegado. Habilitalo en Configuración → Navegador → Ubicación.');
-      } else if(err.code===2){
-        setGpsErr('No se pudo obtener la posición. Estás en un lugar sin señal?');
-      } else {
-        setGpsErr('GPS tardó demasiado. Reintentando...');
-        // reintento automático
-        setTimeout(()=>{
-          if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);
-          activarGPS();
-        },3000);
-      }
+      if(err.code===1)setGpsErr('Permiso GPS denegado. Habilitalo en Configuración del navegador.');
+      else if(err.code===2)setGpsErr('Sin señal GPS. ¿Estás en un lugar cerrado?');
+      else{setGpsErr('GPS timeout, reintentando...');setTimeout(()=>{if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);activarGPS();},3000);}
+      setGpsOn(false);
     },{enableHighAccuracy:true,maximumAge:3000,timeout:20000});
   }
 
-  function abrirGMaps(){
-    if(coords.length===0)return;
-    const wps=coords.map(c=>`${c.lat},${c.lng}`).join('/');
-    window.open(`https://www.google.com/maps/dir/${wps}`,'_blank');
-  }
-
   return React.createElement('div',{style:{position:'fixed',inset:0,background:C.bg,zIndex:200,display:'flex',flexDirection:'column'}},
-    // Banner GPS activo
-    gpsOn&&React.createElement('div',{style:{background:`${C.accent}15`,borderBottom:`1px solid ${C.accent}40`,padding:'8px 16px',display:'flex',alignItems:'center',gap:8,flexShrink:0,zIndex:210}},
-      React.createElement('span',{style:{width:8,height:8,borderRadius:'50%',background:C.accent,display:'inline-block',flexShrink:0}}),
-      React.createElement('span',{style:{fontSize:12,color:C.accent,fontWeight:600}},'GPS activo — pantalla bloqueada desactivada'),
+    gpsOn&&React.createElement('div',{style:{background:`${C.accent}15`,borderBottom:`1px solid ${C.accent}40`,padding:'7px 16px',display:'flex',alignItems:'center',gap:8,flexShrink:0}},
+      React.createElement('span',{style:{width:8,height:8,borderRadius:'50%',background:C.accent,display:'inline-block',animation:'pulse 1.5s infinite'}}),
+      React.createElement('span',{style:{fontSize:12,color:C.accent,fontWeight:600}},'GPS activo · pantalla sin bloqueo'),
       React.createElement('span',{style:{fontSize:11,color:C.muted,marginLeft:'auto'}},'No cerrés la app')
     ),
-    // topbar
-    React.createElement('div',{style:{...topbarS,zIndex:210}},
+    React.createElement('div',{style:TB},
       React.createElement('button',{onClick:onClose,style:{background:'none',border:'none',color:C.muted,fontSize:20,cursor:'pointer',padding:'0 8px 0 0'}},'‹ Volver'),
       React.createElement('span',{style:{fontSize:14,fontWeight:700,color:C.text}},'Mapa de ruta'),
-      React.createElement('span',{style:{fontSize:12,color:C.muted}},`${coords.length} pines`)
+      React.createElement('span',{style:{fontSize:12,color:C.muted}},coords.length+' paradas')
     ),
-    // loading
     cargando&&React.createElement('div',{style:{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:14}},
       React.createElement('div',{style:{fontSize:40}},'🗺️'),
       React.createElement('div',{style:{fontSize:14,fontWeight:700,color:C.text}},'Buscando direcciones...'),
-      React.createElement('div',{style:{fontSize:12,color:C.muted}},`Geocodificando ${paradas.length} paradas, aguardá un momento`)
+      React.createElement('div',{style:{fontSize:12,color:C.muted}},'Geocodificando '+paradas.length+' paradas')
     ),
-    // mapa
     React.createElement('div',{ref:mapDiv,style:{flex:1,display:cargando?'none':'block'}}),
-    // botones flotantes
-    !cargando&&React.createElement('div',{style:{position:'absolute',bottom:24,left:16,right:16,zIndex:210,display:'flex',flexDirection:'column',gap:10,pointerEvents:'none'}},
-      noGeo>0&&React.createElement('div',{style:{background:`${C.warn}20`,border:`1px solid ${C.warn}40`,borderRadius:12,padding:'8px 14px',fontSize:12,color:C.warn,textAlign:'center'}},
-        `⚠ ${noGeo} dirección${noGeo>1?'es':''} no se pudo ubicar`
-      ),
-      React.createElement('div',{style:{display:'flex',gap:10,pointerEvents:'all'}},
-        React.createElement('button',{onClick:activarGPS,disabled:gpsOn,style:{flex:1,padding:'13px',background:gpsOn?`${C.accent}25`:C.accent,color:gpsOn?C.accent:C.bg,border:gpsOn?`2px solid ${C.accent}`:'none',borderRadius:14,fontSize:14,fontWeight:700,cursor:gpsOn?'default':'pointer',boxShadow:gpsOn?`0 0 20px ${C.accent}40`:'0 4px 20px rgba(0,0,0,0.4)'}},gpsOn?'🟢 GPS activo — no cerrés la app':'📍 Activar GPS'),
-        React.createElement('button',{onClick:abrirGMaps,style:{flex:1,padding:'13px',background:C.sky,color:'white',border:'none',borderRadius:14,fontSize:14,fontWeight:700,cursor:'pointer',boxShadow:'0 4px 20px rgba(0,0,0,0.4)'}},'🧭 Navegar con Maps')
+    !cargando&&React.createElement('div',{style:{position:'absolute',bottom:24,left:16,right:16,zIndex:210,display:'flex',flexDirection:'column',gap:10}},
+      React.createElement('div',{style:{display:'flex',gap:10}},
+        React.createElement('button',{onClick:activarGPS,disabled:gpsOn,style:{flex:1,padding:'13px',background:gpsOn?`${C.accent}20`:C.accent,color:gpsOn?C.accent:C.bg,border:gpsOn?`2px solid ${C.accent}`:'none',borderRadius:14,fontSize:14,fontWeight:700,cursor:gpsOn?'default':'pointer',boxShadow:'0 4px 20px rgba(0,0,0,0.4)'}},gpsOn?'🟢 GPS activo':'📍 Activar GPS'),
+        React.createElement('button',{onClick:()=>window.open('https://www.google.com/maps/dir/'+coords.map(c=>c.lat+','+c.lng).join('/'),'_blank'),style:{flex:1,padding:'13px',background:C.sky,color:'white',border:'none',borderRadius:14,fontSize:14,fontWeight:700,cursor:'pointer',boxShadow:'0 4px 20px rgba(0,0,0,0.4)'}},'🧭 Abrir en Maps')
       ),
       gpsErr&&React.createElement('div',{style:{background:`${C.danger}15`,border:`1px solid ${C.danger}40`,borderRadius:12,padding:'8px 14px',fontSize:12,color:C.danger,textAlign:'center'}},gpsErr)
     )
@@ -263,177 +191,184 @@ function MapaRuta({paradas,pedidos,onClose}){
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
-// SELECTOR DE ROL
+// SELECTOR ROL
 // ══════════════════════════════════════════════════════════════════════════════
 function RoleSelector({onSelect}){
+  const [ok,setOk]=useState(false);
+  useEffect(()=>{db.collection('ping').doc('t').set({t:1}).then(()=>setOk(true)).catch(()=>setOk(true));});
   return React.createElement('div',{style:{...A,alignItems:'center',justifyContent:'center',padding:24}},
     React.createElement('div',{style:{textAlign:'center',marginBottom:48}},
       React.createElement('div',{style:{fontSize:56,marginBottom:12}},'🚛'),
       React.createElement('div',{style:{fontSize:30,fontWeight:700,color:C.accent,letterSpacing:'-0.5px'}},'FleteRuta'),
-      React.createElement('div',{style:{fontSize:14,color:C.muted,marginTop:6}},'Gestión de rutas y entregas')
-    ),
-    React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:14,width:'100%',maxWidth:340}},
-      ...[
-        {role:'oficina',icon:'🏢',title:'Oficina / Despacho',sub:'Cargar pedidos · Armar rutas · Ver seguimiento'},
-        {role:'fletero',icon:'🚐',title:'Soy fletero',sub:'Ver mi ruta · Mapa · Marcar entregas'},
-      ].map(({role,icon,title,sub})=>
-        React.createElement('button',{key:role,onClick:()=>onSelect(role),style:{background:C.card,border:`1px solid ${C.border}`,borderRadius:20,padding:'20px',cursor:'pointer',display:'flex',alignItems:'center',gap:16,textAlign:'left',minHeight:80}},
-          React.createElement('span',{style:{fontSize:32,flexShrink:0}},icon),
-          React.createElement('div',null,
-            React.createElement('div',{style:{fontSize:16,fontWeight:700,color:C.text}},title),
-            React.createElement('div',{style:{fontSize:12,color:C.muted,marginTop:4,lineHeight:1.5}},sub)
-          )
-        )
+      React.createElement('div',{style:{fontSize:14,color:C.muted,marginTop:6}},'Gestión de rutas y entregas'),
+      ok&&React.createElement('div',{style:{fontSize:11,color:C.accent,marginTop:10,display:'flex',alignItems:'center',justifyContent:'center',gap:6}},
+        React.createElement('span',{style:{width:6,height:6,borderRadius:'50%',background:C.accent,display:'inline-block'}}),
+        'Conectado a Firebase'
       )
     ),
-    React.createElement('div',{style:{marginTop:40,fontSize:11,color:C.dim,textAlign:'center'}},'Para instalar en celular: menú del navegador → "Agregar a pantalla de inicio"')
+    React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:14,width:'100%',maxWidth:340}},
+      ...[{role:'oficina',icon:'🏢',title:'Oficina / Despacho',sub:'Cargar pedidos · Armar rutas · Seguimiento'},{role:'fletero',icon:'🚐',title:'Soy fletero',sub:'Ver mi ruta · Mapa GPS · Marcar entregas'}]
+      .map(({role,icon,title,sub})=>React.createElement('button',{key:role,onClick:()=>onSelect(role),style:{background:C.card,border:`1px solid ${C.border}`,borderRadius:20,padding:'20px',cursor:'pointer',display:'flex',alignItems:'center',gap:16,textAlign:'left',minHeight:80}},
+        React.createElement('span',{style:{fontSize:32,flexShrink:0}},icon),
+        React.createElement('div',null,React.createElement('div',{style:{fontSize:16,fontWeight:700,color:C.text}},title),React.createElement('div',{style:{fontSize:12,color:C.muted,marginTop:4,lineHeight:1.5}},sub))
+      ))
+    )
   );
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
 // OFICINA
 // ══════════════════════════════════════════════════════════════════════════════
-function Oficina({pedidos,setPedidos,rutas,setRutas,fleteros,onBack}){
+function Oficina({onBack}){
   const [tab,setTab]=useState('pedidos');
+  const [pedidos,setPedidos]=useState([]);
+  const [rutas,setRutas]=useState([]);
   const [form,setForm]=useState({direccion:'',cliente:'',bultos:1,obs:''});
   const [selP,setSelP]=useState([]);
   const [selF,setSelF]=useState('');
+  const [verMapa,setVerMapa]=useState(null);
+
+  useEffect(()=>{
+    const u=db.collection('pedidos').orderBy('creadoEn','desc').onSnapshot(s=>setPedidos(s.docs.map(d=>({id:d.id,...d.data()}))));
+    return()=>u();
+  },[]);
+
+  useEffect(()=>{
+    const hoy=new Date();hoy.setHours(0,0,0,0);
+    const u=db.collection('rutas').where('fecha','>=',hoy).onSnapshot(s=>setRutas(s.docs.map(d=>({id:d.id,...d.data()}))));
+    return()=>u();
+  },[]);
 
   const pend=pedidos.filter(p=>p.status==='pendiente');
-  const enR =pedidos.filter(p=>p.status==='asignado');
-  const entg=pedidos.filter(p=>p.status==='entregado');
+  const sc={pendiente:C.warn,asignado:C.sky,entregado:C.accent,problema:C.danger};
 
-  function addPedido(){
+  async function addPedido(){
     if(!form.direccion.trim()||!form.cliente.trim())return;
-    setPedidos(prev=>[...prev,{id:uid(),...form,bultos:parseInt(form.bultos)||1,status:'pendiente'}]);
+    await db.collection('pedidos').add({...form,bultos:parseInt(form.bultos)||1,status:'pendiente',creadoEn:firebase.firestore.FieldValue.serverTimestamp()});
     setForm({direccion:'',cliente:'',bultos:1,obs:''});
   }
 
-  function crearRuta(){
-    if(!selF||selP.length===0)return;
-    const r={id:uid(),fleteroId:selF,fecha:new Date().toISOString(),
-      paradas:selP.map((pid,i)=>({pedidoId:pid,orden:i+1,status:'pendiente',nota:''}))};
-    setRutas(prev=>[...prev,r]);
-    setPedidos(prev=>prev.map(p=>selP.includes(p.id)?{...p,status:'asignado'}:p));
+  async function crearRuta(){
+    if(!selF||!selP.length)return;
+    const batch=db.batch();
+    const ref=db.collection('rutas').doc();
+    batch.set(ref,{fleteroId:selF,fecha:new Date(),paradas:selP.map((pid,i)=>({pedidoId:pid,orden:i+1,status:'pendiente',nota:''}))});
+    selP.forEach(pid=>batch.update(db.collection('pedidos').doc(pid),{status:'asignado'}));
+    await batch.commit();
     setSelP([]);setSelF('');setTab('seguimiento');
   }
 
-  const TABS=[['pedidos','📦 Pedidos'],['ruta','🗺 Armar ruta'],['seguimiento','📡 Seguimiento']];
-  const statusColor={pendiente:[C.warn,'#1f1500'],asignado:[C.sky,'#001628'],entregado:[C.accent,'#001f17'],problema:[C.danger,'#1f0000']};
+  const rutaMapa=rutas.find(r=>r.id===verMapa);
 
   return React.createElement('div',{style:A},
-    React.createElement('div',{style:topbarS},
+    verMapa&&rutaMapa&&React.createElement(MapaRuta,{paradas:rutaMapa.paradas,pedidos,fleteroId:null,onClose:()=>setVerMapa(null)}),
+    React.createElement('div',{style:TB},
       React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
         React.createElement('button',{onClick:onBack,style:{background:'none',border:'none',color:C.muted,fontSize:22,cursor:'pointer'}},'‹'),
         React.createElement('span',{style:{fontSize:17,fontWeight:700,color:C.accent}},'FleteRuta')
       ),
       React.createElement('span',{style:{fontSize:12,color:C.muted}},'Oficina')
     ),
-    // Stats
     React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,padding:'12px 16px 0'}},
-      ...[[pend.length,'Pendientes',C.warn],[enR.length,'En ruta',C.sky],[entg.length,'Entregados',C.accent]].map(([n,l,c])=>
+      ...[[pedidos.filter(p=>p.status==='pendiente').length,'Pendientes',C.warn],[pedidos.filter(p=>p.status==='asignado').length,'En ruta',C.sky],[pedidos.filter(p=>p.status==='entregado').length,'Entregados',C.accent]].map(([n,l,c])=>
         React.createElement('div',{key:l,style:{background:`${c}15`,border:`1px solid ${c}30`,borderRadius:12,padding:'10px 0',textAlign:'center'}},
           React.createElement('div',{style:{fontSize:22,fontWeight:700,color:c,lineHeight:1}},n),
           React.createElement('div',{style:{fontSize:10,color:C.muted,marginTop:3}},l)
         )
       )
     ),
-    // Tabs
     React.createElement('div',{style:{display:'flex',padding:'12px 16px 0',gap:4,overflowX:'auto',flexShrink:0}},
-      ...TABS.map(([k,l])=>React.createElement('button',{key:k,onClick:()=>setTab(k),
-        style:{padding:'8px 14px',borderRadius:10,border:'none',fontSize:12,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',background:tab===k?C.accent:'transparent',color:tab===k?C.bg:C.muted}},l))
+      ...[['pedidos','📦 Pedidos'],['ruta','🗺 Armar ruta'],['seguimiento','📡 Seguimiento']].map(([k,l])=>
+        React.createElement('button',{key:k,onClick:()=>setTab(k),style:{padding:'8px 14px',borderRadius:10,border:'none',fontSize:12,fontWeight:600,cursor:'pointer',whiteSpace:'nowrap',background:tab===k?C.accent:'transparent',color:tab===k?C.bg:C.muted}},l)
+      )
     ),
-    // Contenido
-    React.createElement('div',{style:scrollS},
+    React.createElement('div',{style:SC},
       // PEDIDOS
       tab==='pedidos'&&React.createElement(React.Fragment,null,
-        React.createElement('div',{style:cardS},
-          React.createElement('div',{style:cardTitle},'Nuevo pedido'),
-          React.createElement('div',{style:row},
-            React.createElement('div',null,React.createElement('label',{style:lbl},'Dirección'),React.createElement('input',{style:inp,value:form.direccion,onChange:e=>setForm({...form,direccion:e.target.value}),placeholder:'Av. Ejemplo 123'})),
-            React.createElement('div',null,React.createElement('label',{style:lbl},'Cliente'),React.createElement('input',{style:inp,value:form.cliente,onChange:e=>setForm({...form,cliente:e.target.value}),placeholder:'Apellido'}))
+        React.createElement('div',{style:CD},
+          React.createElement('div',{style:CT},'Nuevo pedido'),
+          React.createElement('div',{style:R2},
+            React.createElement('div',null,React.createElement('label',{style:LB},'Dirección'),React.createElement('input',{style:IN,value:form.direccion,onChange:e=>setForm({...form,direccion:e.target.value}),placeholder:'Av. Ejemplo 123'})),
+            React.createElement('div',null,React.createElement('label',{style:LB},'Cliente'),React.createElement('input',{style:IN,value:form.cliente,onChange:e=>setForm({...form,cliente:e.target.value}),placeholder:'Apellido'}))
           ),
-          React.createElement('div',{style:row},
-            React.createElement('div',null,React.createElement('label',{style:lbl},'Bultos'),React.createElement('input',{style:inp,type:'number',min:1,value:form.bultos,onChange:e=>setForm({...form,bultos:e.target.value})})),
-            React.createElement('div',null,React.createElement('label',{style:lbl},'Observaciones'),React.createElement('input',{style:inp,value:form.obs,onChange:e=>setForm({...form,obs:e.target.value}),placeholder:'Opcional'}))
+          React.createElement('div',{style:R2},
+            React.createElement('div',null,React.createElement('label',{style:LB},'Bultos'),React.createElement('input',{style:IN,type:'number',min:1,value:form.bultos,onChange:e=>setForm({...form,bultos:e.target.value})})),
+            React.createElement('div',null,React.createElement('label',{style:LB},'Obs.'),React.createElement('input',{style:IN,value:form.obs,onChange:e=>setForm({...form,obs:e.target.value}),placeholder:'Opcional'}))
           ),
-          React.createElement('button',{style:btn(C.accent),onClick:addPedido},'+ Agregar pedido')
+          React.createElement('button',{style:BT(C.accent),onClick:addPedido},'+ Agregar pedido')
         ),
-        React.createElement('div',{style:cardS},
-          React.createElement('div',{style:cardTitle},`Lista (${pedidos.length})`),
-          pedidos.length===0&&React.createElement('div',{style:{color:C.muted,fontSize:13,textAlign:'center',padding:20}},'Sin pedidos cargados.'),
+        React.createElement('div',{style:CD},
+          React.createElement('div',{style:CT},'Lista ('+pedidos.length+')'),
+          pedidos.length===0&&React.createElement('div',{style:{color:C.muted,fontSize:13,textAlign:'center',padding:20}},'Sin pedidos.'),
           ...pedidos.map((p,i)=>{
-            const [bc]=statusColor[p.status]||[C.muted];
+            const bc=sc[p.status]||C.muted;
             return React.createElement('div',{key:p.id,style:{display:'flex',alignItems:'center',gap:10,padding:'10px 0',borderBottom:i<pedidos.length-1?`1px solid ${C.border}`:'none'}},
               React.createElement('div',{style:{width:26,height:26,borderRadius:'50%',background:'rgba(255,255,255,0.06)',color:C.muted,fontSize:12,display:'flex',alignItems:'center',justifyContent:'center',flexShrink:0,fontWeight:600}},i+1),
               React.createElement('div',{style:{flex:1,minWidth:0}},
                 React.createElement('div',{style:{fontSize:13,fontWeight:600,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},p.direccion),
-                React.createElement('div',{style:{fontSize:11,color:C.muted,marginTop:2}},`${p.cliente} · ${p.bultos} bulto${p.bultos>1?'s':''}${p.obs?' · '+p.obs:''}`)
+                React.createElement('div',{style:{fontSize:11,color:C.muted,marginTop:2}},p.cliente+' · '+p.bultos+' bulto'+(p.bultos>1?'s':'')+(p.obs?' · '+p.obs:''))
               ),
-              React.createElement('span',{style:bdg(`${bc}25`,bc)},p.status),
-              p.status==='pendiente'&&React.createElement('button',{onClick:()=>setPedidos(prev=>prev.filter(x=>x.id!==p.id)),style:{background:'none',border:'none',color:C.dim,cursor:'pointer',fontSize:22,padding:'0 4px',lineHeight:1}},'×')
+              React.createElement('span',{style:BG(bc+'25',bc)},p.status),
+              p.status==='pendiente'&&React.createElement('button',{onClick:()=>db.collection('pedidos').doc(p.id).delete(),style:{background:'none',border:'none',color:C.dim,cursor:'pointer',fontSize:22,padding:'0 4px',lineHeight:1}},'×')
             );
           })
         )
       ),
       // ARMAR RUTA
       tab==='ruta'&&React.createElement(React.Fragment,null,
-        React.createElement('div',{style:cardS},
-          React.createElement('div',{style:cardTitle},'1 · Elegir fletero'),
-          ...fleteros.map(f=>React.createElement('button',{key:f.id,onClick:()=>setSelF(f.id),
-            style:{width:'100%',background:selF===f.id?`${C.accent}15`:'rgba(255,255,255,0.03)',border:`1.5px solid ${selF===f.id?C.accent:C.border}`,borderRadius:12,padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:12,marginBottom:8,textAlign:'left'}},
+        React.createElement('div',{style:CD},
+          React.createElement('div',{style:CT},'1 · Elegir fletero'),
+          ...FLETEROS.map(f=>React.createElement('button',{key:f.id,onClick:()=>setSelF(f.id),style:{width:'100%',background:selF===f.id?`${C.accent}15`:'rgba(255,255,255,0.03)',border:`1.5px solid ${selF===f.id?C.accent:C.border}`,borderRadius:12,padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:12,marginBottom:8,textAlign:'left'}},
             React.createElement('div',{style:{width:38,height:38,borderRadius:'50%',background:`${C.sky}25`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:C.sky}},f.avatar),
-            React.createElement('div',{style:{flex:1}},
-              React.createElement('div',{style:{fontSize:14,fontWeight:600,color:C.text}},f.nombre),
-              React.createElement('div',{style:{fontSize:12,color:C.muted}},`${f.vehiculo} · ${f.patente}`)
-            ),
+            React.createElement('div',{style:{flex:1}},React.createElement('div',{style:{fontSize:14,fontWeight:600,color:C.text}},f.nombre)),
             selF===f.id&&React.createElement('span',{style:{color:C.accent,fontSize:18}},'✓')
           ))
         ),
-        React.createElement('div',{style:cardS},
-          React.createElement('div',{style:cardTitle},'2 · Seleccionar pedidos pendientes'),
+        React.createElement('div',{style:CD},
+          React.createElement('div',{style:CT},'2 · Seleccionar pedidos pendientes'),
           pend.length===0&&React.createElement('div',{style:{color:C.muted,fontSize:13,textAlign:'center',padding:16}},'No hay pedidos pendientes.'),
           ...pend.map(p=>{
             const sel=selP.includes(p.id);
-            return React.createElement('button',{key:p.id,onClick:()=>setSelP(prev=>sel?prev.filter(x=>x!==p.id):[...prev,p.id]),
-              style:{width:'100%',background:sel?`${C.accent}12`:'rgba(255,255,255,0.03)',border:`1.5px solid ${sel?C.accent:C.border}`,borderRadius:12,padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:12,marginBottom:8,textAlign:'left'}},
+            return React.createElement('button',{key:p.id,onClick:()=>setSelP(prev=>sel?prev.filter(x=>x!==p.id):[...prev,p.id]),style:{width:'100%',background:sel?`${C.accent}12`:'rgba(255,255,255,0.03)',border:`1.5px solid ${sel?C.accent:C.border}`,borderRadius:12,padding:'12px 14px',cursor:'pointer',display:'flex',alignItems:'center',gap:12,marginBottom:8,textAlign:'left'}},
               React.createElement('div',{style:{width:22,height:22,borderRadius:6,border:`2px solid ${sel?C.accent:C.dim}`,background:sel?C.accent:'transparent',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,color:C.bg,flexShrink:0,fontWeight:700}},sel?'✓':''),
               React.createElement('div',null,
                 React.createElement('div',{style:{fontSize:13,fontWeight:600,color:C.text}},p.direccion),
-                React.createElement('div',{style:{fontSize:11,color:C.muted}},`${p.cliente} · ${p.bultos} bulto${p.bultos>1?'s':''}${p.obs?' · '+p.obs:''}`)
+                React.createElement('div',{style:{fontSize:11,color:C.muted}},p.cliente+' · '+p.bultos+' bulto'+(p.bultos>1?'s':'')+(p.obs?' · '+p.obs:''))
               )
             );
           }),
-          selP.length>0&&selF&&React.createElement('button',{style:{...btn(C.accent),marginTop:10,borderRadius:14},onClick:crearRuta},
-            `✈ Enviar ${selP.length} parada${selP.length>1?'s':''} a ${fleteros.find(f=>f.id===selF)?.nombre}`
-          )
+          selP.length>0&&selF&&React.createElement('button',{style:{...BT(C.accent),marginTop:10,borderRadius:14},onClick:crearRuta},'✈ Enviar '+selP.length+' parada'+(selP.length>1?'s':'')+' a '+FLETEROS.find(f=>f.id===selF)?.nombre)
         )
       ),
       // SEGUIMIENTO
       tab==='seguimiento'&&React.createElement(React.Fragment,null,
-        rutas.length===0&&React.createElement('div',{style:{...cardS,textAlign:'center',padding:40,color:C.muted}},
+        rutas.length===0&&React.createElement('div',{style:{...CD,textAlign:'center',padding:40,color:C.muted}},
           React.createElement('div',{style:{fontSize:36,marginBottom:12}},'📡'),
           React.createElement('div',{style:{fontSize:14,fontWeight:600,color:C.text}},'Sin rutas activas'),
           React.createElement('div',{style:{fontSize:13,marginTop:6}},'Armá una ruta desde "Armar ruta".')
         ),
         ...rutas.map(r=>{
-          const fl=fleteros.find(f=>f.id===r.fleteroId);
-          const done=r.paradas.filter(p=>p.status==='entregado').length;
-          const prob=r.paradas.filter(p=>p.status==='problema').length;
-          const pct=Math.round((done+prob)/r.paradas.length*100);
-          return React.createElement('div',{key:r.id,style:cardS},
+          const fl=FLETEROS.find(f=>f.id===r.fleteroId);
+          const ps=r.paradas||[];
+          const done=ps.filter(p=>p.status==='entregado').length;
+          const prob=ps.filter(p=>p.status==='problema').length;
+          const pct=ps.length?Math.round((done+prob)/ps.length*100):0;
+          return React.createElement('div',{key:r.id,style:CD},
             React.createElement('div',{style:{display:'flex',alignItems:'center',gap:12,marginBottom:14}},
               React.createElement('div',{style:{width:42,height:42,borderRadius:'50%',background:`${C.sky}25`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:14,fontWeight:700,color:C.sky}},fl?.avatar),
               React.createElement('div',{style:{flex:1}},
                 React.createElement('div',{style:{fontSize:15,fontWeight:700,color:C.text}},fl?.nombre),
-                React.createElement('div',{style:{fontSize:12,color:C.muted}},`${fl?.vehiculo} · ${fl?.patente}`)
+                React.createElement('div',{style:{fontSize:12,color:C.muted}},ps.length+' paradas · '+done+' entregadas')
               ),
-              React.createElement('div',{style:{fontSize:18,fontWeight:700,color:pct===100?C.accent:C.text}},`${pct}%`)
+              React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
+                React.createElement('button',{onClick:()=>setVerMapa(r.id),style:{padding:'5px 12px',background:`${C.sky}20`,color:C.sky,border:`1px solid ${C.sky}40`,borderRadius:8,fontSize:12,fontWeight:700,cursor:'pointer'}},'🗺 Mapa'),
+                React.createElement('span',{style:{fontSize:18,fontWeight:700,color:pct===100?C.accent:C.text}},pct+'%')
+              )
             ),
-            React.createElement('div',{style:{height:6,background:'rgba(255,255,255,0.06)',borderRadius:20,overflow:'hidden',marginBottom:14}},
+            React.createElement('div',{style:{height:6,background:'rgba(255,255,255,0.06)',borderRadius:20,overflow:'hidden',marginBottom:ps.length?14:0}},
               React.createElement('div',{style:{height:'100%',width:pct+'%',background:pct===100?C.accent:C.sky,borderRadius:20,transition:'width .4s'}})
             ),
-            ...r.paradas.map((par,i)=>{
+            ...ps.map((par,i)=>{
               const ped=pedidos.find(p=>p.id===par.pedidoId);if(!ped)return null;
               const c=par.status==='entregado'?C.accent:par.status==='problema'?C.danger:C.dim;
               return React.createElement('div',{key:par.pedidoId,style:{display:'flex',alignItems:'center',gap:10,padding:'8px 0',borderTop:`1px solid ${C.border}`,opacity:par.status==='entregado'?0.45:1}},
@@ -442,7 +377,7 @@ function Oficina({pedidos,setPedidos,rutas,setRutas,fleteros,onBack}){
                   React.createElement('div',{style:{fontSize:12,color:C.text,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}},ped.direccion),
                   React.createElement('div',{style:{fontSize:11,color:C.muted}},ped.cliente+(par.nota?' · '+par.nota:''))
                 ),
-                React.createElement('span',{style:bdg(`${c}20`,c)},par.status)
+                React.createElement('span',{style:BG(c+'20',c)},par.status)
               );
             })
           );
@@ -455,74 +390,82 @@ function Oficina({pedidos,setPedidos,rutas,setRutas,fleteros,onBack}){
 // ══════════════════════════════════════════════════════════════════════════════
 // FLETERO
 // ══════════════════════════════════════════════════════════════════════════════
-function Fletero({pedidos,setPedidos,rutas,setRutas,fleteros,onBack}){
+function Fletero({onBack}){
   const [fleteroId,setFleteroId]=useState(null);
+  const [pedidos,setPedidos]=useState([]);
+  const [miRuta,setMiRuta]=useState(null);
   const [notaModal,setNotaModal]=useState(null);
   const [nota,setNota]=useState('');
   const [verMapa,setVerMapa]=useState(false);
 
-  const fl=fleteros.find(f=>f.id===fleteroId);
-  const miRuta=rutas.find(r=>r.fleteroId===fleteroId);
+  const fl=FLETEROS.find(f=>f.id===fleteroId);
+
+  useEffect(()=>{
+    if(!fleteroId)return;
+    const u=db.collection('pedidos').onSnapshot(s=>setPedidos(s.docs.map(d=>({id:d.id,...d.data()}))));
+    return()=>u();
+  },[fleteroId]);
+
+  useEffect(()=>{
+    if(!fleteroId)return;
+    const hoy=new Date();hoy.setHours(0,0,0,0);
+    const u=db.collection('rutas').where('fleteroId','==',fleteroId).where('fecha','>=',hoy).onSnapshot(s=>{
+      if(!s.empty)setMiRuta({id:s.docs[0].id,...s.docs[0].data()});
+      else setMiRuta(null);
+    });
+    return()=>u();
+  },[fleteroId]);
+
   const paradas=miRuta?.paradas||[];
   const done=paradas.filter(p=>p.status==='entregado').length;
   const prob=paradas.filter(p=>p.status==='problema').length;
   const pct=paradas.length?Math.round((done+prob)/paradas.length*100):0;
   const curIdx=paradas.findIndex(p=>p.status==='pendiente');
 
-  function markParada(pedidoId,status,notaTxt=''){
-    setRutas(prev=>prev.map(r=>r.id!==miRuta.id?r:{...r,paradas:r.paradas.map(p=>p.pedidoId===pedidoId?{...p,status,nota:notaTxt}:p)}));
-    setPedidos(prev=>prev.map(p=>p.id===pedidoId?{...p,status}:p));
+  async function markParada(pedidoId,status,notaTxt=''){
+    const np=paradas.map(p=>p.pedidoId===pedidoId?{...p,status,nota:notaTxt}:p);
+    await db.collection('rutas').doc(miRuta.id).update({paradas:np});
+    await db.collection('pedidos').doc(pedidoId).update({status});
   }
 
-  // Selector de fletero
   if(!fleteroId)return React.createElement('div',{style:{...A,alignItems:'center',justifyContent:'center',padding:24}},
     React.createElement('button',{onClick:onBack,style:{position:'absolute',top:16,left:16,background:'none',border:'none',color:C.muted,fontSize:22,cursor:'pointer'}},'‹ Volver'),
     React.createElement('div',{style:{textAlign:'center',marginBottom:36}},
       React.createElement('div',{style:{fontSize:48,marginBottom:10}},'🚐'),
       React.createElement('div',{style:{fontSize:20,fontWeight:700,color:C.text}},'¿Quién sos?'),
-      React.createElement('div',{style:{fontSize:13,color:C.muted,marginTop:6}},'Seleccioná tu nombre para ver tu ruta')
+      React.createElement('div',{style:{fontSize:13,color:C.muted,marginTop:6}},'Seleccioná tu nombre')
     ),
     React.createElement('div',{style:{display:'flex',flexDirection:'column',gap:12,width:'100%',maxWidth:320}},
-      ...fleteros.map(f=>{
-        const tieneRuta=rutas.some(r=>r.fleteroId===f.id);
-        return React.createElement('button',{key:f.id,onClick:()=>setFleteroId(f.id),
-          style:{background:C.card,border:`1px solid ${C.border}`,borderRadius:18,padding:'16px 18px',cursor:'pointer',display:'flex',alignItems:'center',gap:14,minHeight:72}},
-          React.createElement('div',{style:{width:44,height:44,borderRadius:'50%',background:`${C.sky}25`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:C.sky}},f.avatar),
-          React.createElement('div',{style:{textAlign:'left',flex:1}},
-            React.createElement('div',{style:{fontSize:15,fontWeight:700,color:C.text}},f.nombre),
-            React.createElement('div',{style:{fontSize:12,color:C.muted}},`${f.vehiculo} · ${f.patente}`)
-          ),
-          tieneRuta&&React.createElement('span',{style:bdg(`${C.accent}20`,C.accent)},'Ruta lista')
-        );
-      })
+      ...FLETEROS.map(f=>React.createElement('button',{key:f.id,onClick:()=>setFleteroId(f.id),style:{background:C.card,border:`1px solid ${C.border}`,borderRadius:18,padding:'20px 18px',cursor:'pointer',display:'flex',alignItems:'center',gap:14,minHeight:72}},
+        React.createElement('div',{style:{width:44,height:44,borderRadius:'50%',background:`${C.sky}25`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:C.sky}},f.avatar),
+        React.createElement('div',{style:{textAlign:'left',flex:1}},React.createElement('div',{style:{fontSize:16,fontWeight:700,color:C.text}},f.nombre))
+      ))
     )
   );
 
   return React.createElement('div',{style:A},
-    verMapa&&miRuta&&React.createElement(MapaRuta,{paradas:miRuta.paradas,pedidos,onClose:()=>setVerMapa(false)}),
-    React.createElement('div',{style:topbarS},
+    verMapa&&miRuta&&React.createElement(MapaRuta,{paradas:miRuta.paradas,pedidos,fleteroId,onClose:()=>setVerMapa(false)}),
+    React.createElement('div',{style:TB},
       React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
         React.createElement('button',{onClick:()=>setFleteroId(null),style:{background:'none',border:'none',color:C.muted,fontSize:22,cursor:'pointer'}},'‹'),
         React.createElement('div',null,
           React.createElement('div',{style:{fontSize:15,fontWeight:700,color:C.text,lineHeight:1.1}},fl?.nombre),
-          React.createElement('div',{style:{fontSize:11,color:C.muted}},fl?.vehiculo)
+          React.createElement('div',{style:{fontSize:11,color:C.muted}},'FleteRuta')
         )
       ),
       React.createElement('div',{style:{display:'flex',alignItems:'center',gap:8}},
-        miRuta&&React.createElement('button',{onClick:()=>setVerMapa(true),
-          style:{padding:'6px 14px',background:`${C.sky}20`,color:C.sky,border:`1px solid ${C.sky}40`,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer'}},'🗺 Mapa'),
-        React.createElement('span',{style:bdg(miRuta?`${C.accent}20`:`${C.warn}20`,miRuta?C.accent:C.warn)},miRuta?'En ruta':'Sin ruta')
+        miRuta&&React.createElement('button',{onClick:()=>setVerMapa(true),style:{padding:'6px 14px',background:`${C.sky}20`,color:C.sky,border:`1px solid ${C.sky}40`,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer'}},'🗺 Mapa'),
+        React.createElement('span',{style:BG(miRuta?`${C.accent}20`:`${C.warn}20`,miRuta?C.accent:C.warn)},miRuta?'En ruta':'Sin ruta')
       )
     ),
-    React.createElement('div',{style:scrollS},
-      !miRuta&&React.createElement('div',{style:{...cardS,textAlign:'center',padding:48,marginTop:16}},
+    React.createElement('div',{style:SC},
+      !miRuta&&React.createElement('div',{style:{...CD,textAlign:'center',padding:48,marginTop:16}},
         React.createElement('div',{style:{fontSize:48,marginBottom:16}},'⏳'),
         React.createElement('div',{style:{fontSize:16,fontWeight:700,color:C.text,marginBottom:8}},'Esperando ruta'),
         React.createElement('div',{style:{fontSize:13,color:C.muted,lineHeight:1.6}},'La oficina todavía no te asignó paradas para hoy.')
       ),
       miRuta&&React.createElement(React.Fragment,null,
-        // Progress
-        React.createElement('div',{style:cardS},
+        React.createElement('div',{style:CD},
           React.createElement('div',{style:{display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:8,marginBottom:14}},
             ...[[done,'Entregados',C.accent],[paradas.length-done-prob,'Pendientes',C.warn],[prob,'Problemas',C.danger]].map(([n,l,c])=>
               React.createElement('div',{key:l,style:{background:`${c}12`,border:`1px solid ${c}25`,borderRadius:10,padding:'10px 0',textAlign:'center'}},
@@ -534,74 +477,59 @@ function Fletero({pedidos,setPedidos,rutas,setRutas,fleteros,onBack}){
           React.createElement('div',{style:{height:8,background:'rgba(255,255,255,0.06)',borderRadius:20,overflow:'hidden'}},
             React.createElement('div',{style:{height:'100%',width:pct+'%',background:pct===100?C.accent:C.sky,borderRadius:20,transition:'width .5s ease'}})
           ),
-          React.createElement('div',{style:{fontSize:12,color:C.muted,textAlign:'right',marginTop:5}},`${pct}% completado · ${paradas.length} paradas`)
+          React.createElement('div',{style:{fontSize:12,color:C.muted,textAlign:'right',marginTop:5}},pct+'% · '+paradas.length+' paradas')
         ),
-        // Paradas
-        React.createElement('div',{style:cardS},
-          React.createElement('div',{style:cardTitle},'Mis paradas'),
+        React.createElement('div',{style:CD},
+          React.createElement('div',{style:CT},'Mis paradas'),
           ...paradas.map((par,i)=>{
             const ped=pedidos.find(p=>p.id===par.pedidoId);if(!ped)return null;
-            const isCur=i===curIdx;
-            const isDone=par.status==='entregado';
-            const isProb=par.status==='problema';
+            const isCur=i===curIdx,isDone=par.status==='entregado',isProb=par.status==='problema';
             const dotC=isDone?C.accent:isProb?C.danger:isCur?C.accent:C.dim;
             return React.createElement('div',{key:par.pedidoId,style:{display:'flex',gap:10,marginBottom:8}},
               React.createElement('div',{style:{display:'flex',flexDirection:'column',alignItems:'center',paddingTop:2}},
-                React.createElement('div',{style:{width:30,height:30,borderRadius:'50%',background:`${dotC}20`,border:`2px solid ${dotC}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:dotC,flexShrink:0}},
-                  isDone?'✓':isProb?'!':i+1
-                ),
+                React.createElement('div',{style:{width:30,height:30,borderRadius:'50%',background:`${dotC}20`,border:`2px solid ${dotC}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:700,color:dotC,flexShrink:0}},isDone?'✓':isProb?'!':i+1),
                 i<paradas.length-1&&React.createElement('div',{style:{width:2,flex:1,minHeight:12,background:C.border,margin:'3px 0'}})
               ),
               React.createElement('div',{style:{flex:1,background:isCur?`${C.accent}08`:'rgba(255,255,255,0.02)',border:`1.5px solid ${isCur?C.accent:C.border}`,borderRadius:14,padding:'12px 14px',opacity:isDone?0.4:1,transition:'opacity .3s'}},
                 React.createElement('div',{style:{fontSize:14,fontWeight:700,color:C.text}},ped.direccion),
-                React.createElement('div',{style:{fontSize:12,color:C.muted,marginTop:3}},`${ped.cliente} · ${ped.bultos} bulto${ped.bultos>1?'s':''}${ped.obs?' · '+ped.obs:''}`),
-                isProb&&par.nota&&React.createElement('div',{style:{fontSize:12,color:C.danger,marginTop:6,background:`${C.danger}10`,padding:'6px 10px',borderRadius:8}},`⚠ ${par.nota}`),
+                React.createElement('div',{style:{fontSize:12,color:C.muted,marginTop:3}},ped.cliente+' · '+ped.bultos+' bulto'+(ped.bultos>1?'s':'')+(ped.obs?' · '+ped.obs:'')),
+                isProb&&par.nota&&React.createElement('div',{style:{fontSize:12,color:C.danger,marginTop:6,background:`${C.danger}10`,padding:'6px 10px',borderRadius:8}},'⚠ '+par.nota),
                 isCur&&React.createElement('div',{style:{display:'flex',gap:8,marginTop:12,flexWrap:'wrap'}},
-                  React.createElement('a',{href:`https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(ped.direccion+' Córdoba Argentina')}`,target:'_blank',
-                    style:{flex:1,minWidth:80,padding:'10px',background:`${C.sky}20`,color:C.sky,border:`1px solid ${C.sky}40`,borderRadius:10,fontSize:13,fontWeight:700,textDecoration:'none',display:'flex',alignItems:'center',justifyContent:'center',gap:4,minHeight:44}},'📍 Navegar'),
-                  React.createElement('button',{onClick:()=>markParada(par.pedidoId,'entregado'),
-                    style:{flex:1,minWidth:80,padding:'10px',background:C.accent,color:C.bg,border:'none',borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',minHeight:44}},'✓ Entregado'),
-                  React.createElement('button',{onClick:()=>{setNotaModal(par.pedidoId);setNota('');},
-                    style:{flex:1,minWidth:80,padding:'10px',background:`${C.danger}20`,color:C.danger,border:`1px solid ${C.danger}40`,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',minHeight:44}},'✗ Problema')
+                  React.createElement('a',{href:'https://www.google.com/maps/search/?api=1&query='+encodeURIComponent(ped.direccion+' Córdoba Argentina'),target:'_blank',style:{flex:1,minWidth:80,padding:'10px',background:`${C.sky}20`,color:C.sky,border:`1px solid ${C.sky}40`,borderRadius:10,fontSize:13,fontWeight:700,textDecoration:'none',display:'flex',alignItems:'center',justifyContent:'center',gap:4,minHeight:44}},'📍 Navegar'),
+                  React.createElement('button',{onClick:()=>markParada(par.pedidoId,'entregado'),style:{flex:1,minWidth:80,padding:'10px',background:C.accent,color:C.bg,border:'none',borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',minHeight:44}},'✓ Entregado'),
+                  React.createElement('button',{onClick:()=>{setNotaModal(par.pedidoId);setNota('');},style:{flex:1,minWidth:80,padding:'10px',background:`${C.danger}20`,color:C.danger,border:`1px solid ${C.danger}40`,borderRadius:10,fontSize:13,fontWeight:700,cursor:'pointer',minHeight:44}},'✗ Problema')
                 )
               )
             );
           })
         ),
-        pct===100&&React.createElement('div',{style:{...cardS,textAlign:'center',padding:32,border:`1px solid ${C.accent}40`}},
+        pct===100&&React.createElement('div',{style:{...CD,textAlign:'center',padding:32,border:`1px solid ${C.accent}40`}},
           React.createElement('div',{style:{fontSize:40,marginBottom:10}},'🎉'),
           React.createElement('div',{style:{fontSize:17,fontWeight:700,color:C.accent}},'¡Ruta completada!'),
-          React.createElement('div',{style:{fontSize:13,color:C.muted,marginTop:6}},'Todas las paradas fueron procesadas.')
+          React.createElement('div',{style:{fontSize:13,color:C.muted,marginTop:6}},'Todas las paradas procesadas.')
         )
       )
     ),
-    // Modal problema
     notaModal&&React.createElement('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',zIndex:100}},
       React.createElement('div',{style:{background:C.surface,borderRadius:'20px 20px 0 0',padding:'24px 20px 40px',width:'100%',border:`1px solid ${C.border}`}},
         React.createElement('div',{style:{fontSize:17,fontWeight:700,color:C.text,marginBottom:6}},'¿Qué pasó?'),
-        React.createElement('div',{style:{fontSize:13,color:C.muted,marginBottom:16}},'Describí el problema para que lo vea la oficina.'),
-        React.createElement('textarea',{value:nota,onChange:e=>setNota(e.target.value),placeholder:'Ej: No había nadie, puerta cerrada...',style:{...inp,height:90,resize:'none',marginBottom:14}}),
+        React.createElement('div',{style:{fontSize:13,color:C.muted,marginBottom:16}},'Describí el problema para la oficina.'),
+        React.createElement('textarea',{value:nota,onChange:e=>setNota(e.target.value),placeholder:'Ej: No había nadie, puerta cerrada...',style:{...IN,height:90,resize:'none',marginBottom:14}}),
         React.createElement('div',{style:{display:'flex',gap:10}},
-          React.createElement('button',{onClick:()=>setNotaModal(null),style:{...btn('rgba(255,255,255,0.08)',C.muted),flex:1}},'Cancelar'),
-          React.createElement('button',{onClick:()=>{markParada(notaModal,'problema',nota);setNotaModal(null);},style:{...btn(C.danger),flex:1}},'Confirmar')
+          React.createElement('button',{onClick:()=>setNotaModal(null),style:{...BT('rgba(255,255,255,0.08)',C.muted),flex:1}},'Cancelar'),
+          React.createElement('button',{onClick:()=>{markParada(notaModal,'problema',nota);setNotaModal(null);},style:{...BT(C.danger),flex:1}},'Confirmar')
         )
       )
     )
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
-// ROOT
-// ══════════════════════════════════════════════════════════════════════════════
+// ── ROOT ──────────────────────────────────────────────────────────────────────
 function App(){
   const [role,setRole]=useState(null);
-  const [pedidos,setPedidos]=useState(PEDIDOS_INIT);
-  const [rutas,setRutas]=useState([]);
-  const [fleteros]=useState(FLETEROS);
-
   if(!role)return React.createElement(RoleSelector,{onSelect:setRole});
-  if(role==='oficina')return React.createElement(Oficina,{pedidos,setPedidos,rutas,setRutas,fleteros,onBack:()=>setRole(null)});
-  return React.createElement(Fletero,{pedidos,setPedidos,rutas,setRutas,fleteros,onBack:()=>setRole(null)});
+  if(role==='oficina')return React.createElement(Oficina,{onBack:()=>setRole(null)});
+  return React.createElement(Fletero,{onBack:()=>setRole(null)});
 }
 
 ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
