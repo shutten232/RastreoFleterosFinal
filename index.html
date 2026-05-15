@@ -163,8 +163,8 @@ function MapaOficina({onBack}){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map);
     L.control.zoom({position:'bottomright'}).addTo(map);
 
-    // Limpiar markers de fleteros inactivos cada 30 seg
-    const TIMEOUT_MS = 60000; // 60 segundos sin señal = se oculta
+    // Ocultar marker si no hay señal en 15 segundos
+    const TIMEOUT_MS = 15000;
     const cleanupInterval = setInterval(()=>{
       const ahora = Date.now();
       Object.keys(mkrs.current).forEach(id=>{
@@ -175,32 +175,39 @@ function MapaOficina({onBack}){
           setEstados(prev=>{ const n={...prev}; delete n[id]; return n; });
         }
       });
-    },10000);
+    },3000);
+
+    // Crear iconos una sola vez por fletero
+    const iconos={};
+    FL.forEach(fl=>{
+      iconos[fl.id]=L.divIcon({className:'',
+        html:`<div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center">
+          <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:${fl.color};animation:ripple 2s ease-out infinite;opacity:0.3"></div>
+          <div style="width:34px;height:34px;border-radius:50%;background:${fl.color};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;box-shadow:0 2px 12px rgba(0,0,0,0.5);position:relative;z-index:1;font-family:sans-serif">${fl.nombre.slice(0,2).toUpperCase()}</div>
+        </div>`,
+        iconSize:[44,44],iconAnchor:[22,22]});
+    });
 
     const unsub=db.collection('posiciones').onSnapshot(snap=>{
       const est={};
       if(!window._lastGpsSeen) window._lastGpsSeen={};
       snap.forEach(doc=>{
         const d=doc.data(),fl=FL.find(f=>f.id===doc.id);
-        if(!fl||!d.lat)return;
+        if(!fl||!d.lat||!d.lng)return;
         window._lastGpsSeen[doc.id]=Date.now();
         est[doc.id]=true;
-        const ico=L.divIcon({className:'',
-          html:`<div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center">
-            <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:${fl.color};animation:ripple 2s ease-out infinite;opacity:0.3"></div>
-            <div style="width:34px;height:34px;border-radius:50%;background:${fl.color};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;box-shadow:0 2px 12px rgba(0,0,0,0.5);position:relative;z-index:1;font-family:'DM Sans',sans-serif">${fl.nombre.slice(0,2).toUpperCase()}</div>
-          </div>`,
-          iconSize:[44,44],iconAnchor:[22,22]});
         if(mkrs.current[doc.id]){
+          // Solo mover el marker, sin tocar el ícono
           mkrs.current[doc.id].setLatLng([d.lat,d.lng]);
-          mkrs.current[doc.id].setIcon(ico);
-          mkrs.current[doc.id].update();
         }else{
-          mkrs.current[doc.id]=L.marker([d.lat,d.lng],{icon:ico,zIndexOffset:1000}).addTo(map).bindPopup(`<b>🚐 ${fl.nombre}</b>`);
+          // Primera vez: crear el marker
+          mkrs.current[doc.id]=L.marker([d.lat,d.lng],{
+            icon:iconos[doc.id],
+            zIndexOffset:1000
+          }).addTo(map).bindPopup(`<b>🚐 ${fl.nombre}</b>`);
         }
-        map.invalidateSize();
       });
-      setEstados(est);
+      setEstados(prev=>({...prev,...est}));
     });
     return()=>{unsub();clearInterval(cleanupInterval);map.remove();mapRef.current=null;window._lastGpsSeen={};};
   },[]);
@@ -223,10 +230,13 @@ function MapaOficina({onBack}){
     h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',padding:'8px 12px',display:'flex',gap:8,flexShrink:0}},
       ...FL.map(f=>{
         const activo=estados[f.id];
+        const segs=window._lastGpsSeen&&window._lastGpsSeen[f.id]?Math.round((Date.now()-window._lastGpsSeen[f.id])/1000):null;
+        const tiempoStr=activo&&segs!==null?(segs<5?'ahora':segs+'s'):null;
         return h('button',{key:f.id,onClick:()=>centrar(f.id),
           style:{padding:'7px 16px',borderRadius:20,border:`1.5px solid ${activo?f.color:'rgba(255,255,255,0.1)'}`,background:activo?`${f.color}18`:'transparent',color:activo?f.color:'#4a6080',fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontFamily:"'DM Sans',sans-serif"}},
           h('span',{style:{width:8,height:8,borderRadius:'50%',background:activo?f.color:'#4a6080',display:'inline-block',animation:activo?'pulse 2s infinite':'none'}}),
-          f.nombre
+          f.nombre,
+          tiempoStr&&h('span',{style:{fontSize:10,opacity:0.7,fontWeight:400}},tiempoStr)
         );
       })
     ),
@@ -264,12 +274,18 @@ function PantallaFletero({fl,onBack}){
       },
       err=>{
         if(err.code===1)setError('Permiso GPS denegado. Habilitalo en Configuración.');
-        else if(err.code===2)setError('Sin señal GPS.');
-        else setError('Error GPS: '+err.message);
+        else if(err.code===2)setError('Sin señal GPS. Intentando reconectar...');
+        else setError('GPS desconectado, reintentando...');
+        // Borrar de Firebase inmediatamente — no mostrar en mapa si no hay señal
+        db.collection('posiciones').doc(fl.id).delete();
+        clearInterval(intervalRef.current);
         setGpsOn(false);
+        lastPosRef.current=null;
+        // Reintentar automáticamente en 3 segundos
+        setTimeout(()=>activar(), 3000);
       }
     );
-    // Forzar subida a Firebase cada 5 segundos aunque no haya movimiento
+    // Forzar subida a Firebase cada 3 segundos
     intervalRef.current = setInterval(()=>{
       if(lastPosRef.current){
         db.collection('posiciones').doc(fl.id).set({
@@ -279,7 +295,7 @@ function PantallaFletero({fl,onBack}){
           ts:firebase.firestore.FieldValue.serverTimestamp()
         });
       }
-    }, 5000);
+    }, 3000);
   }
 
   async function desactivar(){
