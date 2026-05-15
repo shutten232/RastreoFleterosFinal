@@ -47,29 +47,38 @@ const CBA=[-31.4167,-64.1833];
 
 // ── NATIVE GPS BRIDGE ─────────────────────────────────────────────────────────
 function isNative(){return window.Capacitor&&window.Capacitor.isNativePlatform();}
+function getPlugin(){return window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.GpsPlugin;}
 
 async function startNativeGps(fleteroId,fleteroNombre){
-  const plugin=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.GpsPlugin;
+  const plugin=getPlugin();
   if(!plugin)throw new Error('Plugin no disponible');
   await plugin.startTracking({fleteroId,fleteroNombre});
 }
 
 async function stopNativeGps(){
-  const plugin=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.GpsPlugin;
+  const plugin=getPlugin();
   if(!plugin)return;
   await plugin.stopTracking({});
 }
 
-function geoErrorText(err){
-  if(!err)return 'No se pudo leer el GPS';
-  if(err.code===1)return 'Permiso de ubicación denegado. Activá Ubicación para este sitio/app.';
-  if(err.code===2)return 'El celular no pudo calcular la ubicación. Activá GPS/Alta precisión.';
-  if(err.code===3)return 'El GPS tardó demasiado. Salí al exterior o esperá unos segundos y probá otra vez.';
-  return err.message||'Error de GPS';
-}
-
-function ahoraAR(){
-  return new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'});
+// Pide posición al servicio nativo y la sube a Firebase
+async function getAndUploadPosition(fleteroId,fleteroNombre){
+  const plugin=getPlugin();
+  if(!plugin)return;
+  try{
+    const pos=await plugin.getPosition({});
+    if(pos&&pos.lat){
+      await db.collection('posiciones').doc(fleteroId).set({
+        lat:pos.lat,lng:pos.lng,nombre:fleteroNombre,
+        ts:firebase.firestore.FieldValue.serverTimestamp()
+      });
+    }
+  }catch(e){
+    // sin_señal o señal_vieja — borrar de Firebase
+    if(e.message==='sin_señal'||e.message==='señal_vieja'){
+      db.collection('posiciones').doc(fleteroId).delete().catch(()=>{});
+    }
+  }
 }
 
 // ── ESTILOS ───────────────────────────────────────────────────────────────────
@@ -145,12 +154,13 @@ function MapaOficina({onBack}){
       const est={};
       snap.forEach(doc=>{
         const d=doc.data(),f=FL.find(x=>x.id===doc.id);
-        if(!f||typeof d.lat!=='number'||typeof d.lng!=='number')return;
-        // No borrar al instante: en celulares el GPS puede mandar cada varios segundos.
-        // updatedAtMs evita que el serverTimestamp llegue nulo en el primer segundo.
-        const t=d.updatedAtMs||(d.ts&&d.ts.seconds?d.ts.seconds*1000:Date.now());
-        if(Date.now()-t>120000)return;
-        lastSeen.current[doc.id]=t;
+        if(!f||!d.lat||!d.lng)return;
+        // Ignorar posiciones con más de 20 segundos
+        if(d.ts){
+          const edad=(Date.now()/1000)-(d.ts.seconds||0);
+          if(edad>20)return;
+        }
+        lastSeen.current[doc.id]=Date.now();
         est[doc.id]=true;
         if(mkrs.current[doc.id]){
           mkrs.current[doc.id].setLatLng([d.lat,d.lng]);
@@ -166,7 +176,7 @@ function MapaOficina({onBack}){
     const limpieza=setInterval(()=>{
       const ahora=Date.now();
       Object.keys(mkrs.current).forEach(id=>{
-        if(ahora-(lastSeen.current[id]||0)>120000){
+        if(ahora-(lastSeen.current[id]||0)>15000){
           mkrs.current[id].remove();
           delete mkrs.current[id];
           setEstados(e=>{const n={...e};delete n[id];return n;});
@@ -220,100 +230,64 @@ function PantallaFletero({fl,onBack}){
   const [gpsOn,setGpsOn]=useState(false);
   const [error,setError]=useState('');
   const [pos,setPos]=useState(null);
-  const watchId=useRef(null);
 
-  // Limpiar posición vieja al entrar y al salir
+  // Limpiar posición vieja al entrar
   useEffect(()=>{
     db.collection('posiciones').doc(fl.id).delete().catch(()=>{});
-    return()=>{
-      if(watchId.current!==null&&navigator.geolocation){
-        navigator.geolocation.clearWatch(watchId.current);
-        watchId.current=null;
-      }
-    };
-  },[fl.id]);
+    return()=>{clearInterval(pollingRef.current);};
+  },[]);
 
-  async function publicar(lat,lng,accuracy){
-    const data={
-      lat,lng,
-      accuracy:accuracy||null,
-      nombre:fl.nombre,
-      fleteroId:fl.id,
-      updatedAtMs:Date.now(),
-      userAgent:navigator.userAgent,
-      ts:firebase.firestore.FieldValue.serverTimestamp()
-    };
-    await db.collection('posiciones').doc(fl.id).set(data,{merge:true});
-  }
-
-  function iniciarGpsWeb(){
-    if(!navigator.geolocation){setError('GPS no disponible en este celular/navegador');return;}
-
-    if(watchId.current!==null){
-      navigator.geolocation.clearWatch(watchId.current);
-      watchId.current=null;
-    }
-
-    setGpsOn(true);
-    setPos({hora:ahoraAR(),estado:'Buscando señal...'});
-
-    // Primera lectura rápida. Sirve para que la oficina vea algo apenas activa.
-    navigator.geolocation.getCurrentPosition(
-      p=>{
-        const lat=p.coords.latitude,lng=p.coords.longitude;
-        setGpsOn(true);
-        setPos({lat,lng,accuracy:Math.round(p.coords.accuracy||0),hora:ahoraAR(),estado:'Señal enviada'});
-        publicar(lat,lng,p.coords.accuracy).catch(e=>setError('Firebase no recibió la ubicación: '+e.message));
-      },
-      err=>setError(geoErrorText(err)),
-      {enableHighAccuracy:true,maximumAge:0,timeout:20000}
-    );
-
-    // Seguimiento continuo mientras la pantalla siga abierta.
-    watchId.current=navigator.geolocation.watchPosition(
-      p=>{
-        const lat=p.coords.latitude,lng=p.coords.longitude;
-        setGpsOn(true);
-        setError('');
-        setPos({lat,lng,accuracy:Math.round(p.coords.accuracy||0),hora:ahoraAR(),estado:'Señal enviada'});
-        publicar(lat,lng,p.coords.accuracy).catch(e=>setError('Firebase no recibió la ubicación: '+e.message));
-      },
-      err=>setError(geoErrorText(err)),
-      {enableHighAccuracy:true,maximumAge:5000,timeout:30000}
-    );
-  }
+  const [cargando,setCargando]=useState(false);
+  const pollingRef=useRef(null);
 
   async function activar(){
     setError('');
-
-    // Si existe plugin nativo, lo intento. Igual activo fallback web para que no quede mudo.
     if(isNative()){
       try{
+        setCargando(true);
         await startNativeGps(fl.id,fl.nombre);
+        setGpsOn(true);
+        setCargando(false);
+        setPos({hora:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})});
+        // Polling: cada 3 segundos pide posición al servicio nativo y sube a Firebase
+        pollingRef.current=setInterval(()=>getAndUploadPosition(fl.id,fl.nombre),3000);
       }catch(e){
-        console.warn('GPS nativo no disponible, uso GPS web',e);
+        setCargando(false);
+        if(e.message&&e.message.includes('denegado')){
+          setError('GPS_DENEGADO');
+        }else{
+          setError('Error al iniciar GPS: '+e.message);
+        }
       }
+    }else{
+      // Fallback para browser/PC
+      if(!navigator.geolocation){setError('GPS no disponible');return;}
+      navigator.geolocation.watchPosition(
+        p=>{
+          setGpsOn(true);
+          const lat=p.coords.latitude,lng=p.coords.longitude;
+          setPos({lat,lng,hora:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})});
+          db.collection('posiciones').doc(fl.id).set({lat,lng,nombre:fl.nombre,ts:firebase.firestore.FieldValue.serverTimestamp()});
+        },
+        err=>setError('Error GPS: '+err.message),
+        {enableHighAccuracy:true,maximumAge:3000,timeout:30000}
+      );
     }
-
-    iniciarGpsWeb();
   }
 
   async function desactivar(){
-    if(watchId.current!==null&&navigator.geolocation){
-      navigator.geolocation.clearWatch(watchId.current);
-      watchId.current=null;
-    }
-    if(isNative())await stopNativeGps().catch(()=>{});
+    clearInterval(pollingRef.current);
+    if(isNative())await stopNativeGps();
     await db.collection('posiciones').doc(fl.id).delete().catch(()=>{});
-    setGpsOn(false);setPos(null);setError('');
+    setGpsOn(false);setPos(null);
   }
 
   return h('div',{style:page},
     // Banner GPS activo
     gpsOn&&h('div',{style:{background:`${fl.color}15`,borderBottom:`1px solid ${fl.color}40`,padding:'8px 16px',display:'flex',alignItems:'center',gap:8}},
       h('span',{style:{width:8,height:8,borderRadius:'50%',background:fl.color,display:'inline-block',animation:'pulse 1.5s infinite'}}),
-      h('span',{style:{fontSize:12,color:fl.color,fontWeight:600}},'GPS activo'),
-      h('span',{style:{fontSize:11,color:'#94a3b8',marginLeft:'auto'}},'Mantené esta pantalla abierta')
+      h('span',{style:{fontSize:12,color:fl.color,fontWeight:600}},isNative()?'GPS activo en segundo plano ✓':'GPS activo'),
+      h('span',{style:{fontSize:11,color:'#94a3b8',marginLeft:'auto'}},isNative()?'Podés usar WhatsApp':'No cerrés la app')
     ),
     // Topbar
     h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}},
@@ -330,34 +304,43 @@ function PantallaFletero({fl,onBack}){
       h('div',{style:{position:'relative',width:160,height:160,display:'flex',alignItems:'center',justifyContent:'center'}},
         gpsOn&&h('div',{style:{position:'absolute',width:160,height:160,borderRadius:'50%',background:fl.color,animation:'ripple 2.5s ease-out infinite',opacity:0.2}}),
         gpsOn&&h('div',{style:{position:'absolute',width:160,height:160,borderRadius:'50%',background:fl.color,animation:'ripple 2.5s ease-out 1.2s infinite',opacity:0.15}}),
-        h('button',{onClick:gpsOn?desactivar:activar,style:{
+        h('button',{onClick:gpsOn?desactivar:activar,disabled:cargando,style:{
           width:150,height:150,borderRadius:'50%',
-          border:`4px solid ${gpsOn?fl.color:'rgba(255,255,255,0.12)'}`,
-          background:gpsOn?`${fl.color}15`:'rgba(255,255,255,0.03)',
-          cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,
+          border:`4px solid ${gpsOn?fl.color:cargando?fl.color+'80':'rgba(255,255,255,0.12)'}`,
+          background:gpsOn?`${fl.color}15`:cargando?`${fl.color}08`:'rgba(255,255,255,0.03)',
+          cursor:cargando?'wait':'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,
           position:'relative',zIndex:1,transition:'all .3s'
         }},
-          h('span',{style:{fontSize:52}},gpsOn?'📍':'🔌'),
-          h('span',{style:{fontSize:14,fontWeight:700,color:gpsOn?fl.color:'#94a3b8'}},gpsOn?'Activo':'Activar GPS')
+          h('span',{style:{fontSize:52,animation:cargando?'pulse 1s infinite':'none'}},gpsOn?'📍':cargando?'⏳':'🔌'),
+          h('span',{style:{fontSize:14,fontWeight:700,color:gpsOn?fl.color:cargando?fl.color:'#94a3b8'}},
+            gpsOn?'Activo':cargando?'Pidiendo permiso...':'Activar GPS')
         )
       ),
       // Info
       pos&&h('div',{style:{background:'#1e3148',border:`1px solid ${fl.color}30`,borderRadius:16,padding:'14px 20px',textAlign:'center',width:'100%',maxWidth:280}},
-        h('div',{style:{fontSize:11,color:'#94a3b8',marginBottom:4}},pos.estado||'GPS activo'),
+        h('div',{style:{fontSize:11,color:'#94a3b8',marginBottom:4}},'GPS activo desde'),
         h('div',{style:{fontSize:20,fontWeight:700,color:'#f0f4f8'}},pos.hora),
-        pos.accuracy&&h('div',{style:{fontSize:11,color:'#94a3b8',marginTop:5}},'Precisión aprox. '+pos.accuracy+' m'),
-        h('div',{style:{fontSize:12,color:fl.color,marginTop:6,fontWeight:600}},'✓ Señal enviada a la oficina')
+        isNative()&&h('div',{style:{fontSize:12,color:fl.color,marginTop:6,fontWeight:600}},'✓ Funciona con pantalla apagada')
       ),
-      error&&h('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:12,padding:'14px 16px',fontSize:13,color:'#ef4444',textAlign:'center',maxWidth:300,lineHeight:1.6}},
-        h('div',{style:{fontSize:20,marginBottom:8}},'⚠️'),
-        error,
-        h('br'),
-        h('div',{style:{fontSize:11,color:'#94a3b8',marginTop:8}},'Configuración → Apps → FleteRuta → Permisos → Ubicación → Permitir todo el tiempo')
-      ),
+      error&&error==='GPS_DENEGADO'
+        ? h('div',{style:{background:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:16,padding:'18px',textAlign:'center',maxWidth:300}},
+            h('div',{style:{fontSize:32,marginBottom:10}},'📍'),
+            h('div',{style:{fontSize:15,fontWeight:700,color:'#ef4444',marginBottom:8}},'Sin permiso de ubicación'),
+            h('div',{style:{fontSize:12,color:'#94a3b8',lineHeight:1.8,marginBottom:14}},
+              '1. Abrí Configuración del celu',h('br'),
+              '2. Aplicaciones → FleteRuta',h('br'),
+              '3. Permisos → Ubicación',h('br'),
+              h('strong',{style:{color:'#f0f4f8'}},'4. Elegí "Permitir todo el tiempo"')
+            ),
+            h('button',{onClick:activar,style:{padding:'10px 24px',background:'#ef4444',color:'white',border:'none',borderRadius:10,fontSize:14,fontWeight:700,cursor:'pointer'}},'Reintentar')
+          )
+        : error&&h('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:12,padding:'14px 16px',fontSize:13,color:'#ef4444',textAlign:'center',maxWidth:300,lineHeight:1.6}},error),
       !gpsOn&&!error&&h('div',{style:{fontSize:13,color:'#4a6080',textAlign:'center',maxWidth:260,lineHeight:1.7}},
         'Tocá el botón para activar el GPS.',
         h('br'),
-        h('span',{style:{color:'#00c896',fontWeight:600}},'La oficina te ve en el mapa al instante.')
+        isNative()
+          ?h('span',{style:{color:'#00c896',fontWeight:600}},'Funciona aunque uses WhatsApp.')
+          :'La oficina te ve en el mapa al instante.'
       )
     )
   );
