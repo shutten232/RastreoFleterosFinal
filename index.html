@@ -234,8 +234,7 @@ function Oficina({onBack}){
   },[]);
 
   useEffect(()=>{
-    const hoy=new Date();hoy.setHours(0,0,0,0);
-    const u=db.collection('rutas').where('fecha','>=',hoy).onSnapshot(s=>setRutas(s.docs.map(d=>({id:d.id,...d.data()}))));
+    const u=db.collection('rutas').onSnapshot(s=>setRutas(s.docs.map(d=>({id:d.id,...d.data()}))));
     return()=>u();
   },[]);
 
@@ -408,8 +407,7 @@ function Fletero({onBack}){
 
   useEffect(()=>{
     if(!fleteroId)return;
-    const hoy=new Date();hoy.setHours(0,0,0,0);
-    const u=db.collection('rutas').where('fleteroId','==',fleteroId).where('fecha','>=',hoy).onSnapshot(s=>{
+    const u=db.collection('rutas').where('fleteroId','==',fleteroId).onSnapshot(s=>{
       if(!s.empty)setMiRuta({id:s.docs[0].id,...s.docs[0].data()});
       else setMiRuta(null);
     });
