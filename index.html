@@ -4,49 +4,38 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <meta name="theme-color" content="#0f1c2e"/>
-<meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
-<meta name="apple-mobile-web-app-title" content="FleteRuta"/>
 <title>FleteRuta</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
-<link rel="manifest" href="data:application/json,{%22name%22:%22FleteRuta+QUIRGROUP%22,%22short_name%22:%22FleteRuta%22,%22start_url%22:%22.%22,%22display%22:%22standalone%22,%22background_color%22:%22%230f1c2e%22,%22theme_color%22:%22%230f1c2e%22,%22icons%22:[{%22src%22:%22https://raw.githubusercontent.com/twitter/twemoji/master/assets/72x72/1f69a.png%22,%22sizes%22:%2272x72%22,%22type%22:%22image/png%22}]}"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
 <style>
 *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent}
 html,body,#root{height:100%;background:#0f1c2e}
 body{font-family:'DM Sans',sans-serif;overscroll-behavior:none}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:0.25}}
-@keyframes ripple{0%{transform:scale(1);opacity:0.6}100%{transform:scale(2.5);opacity:0}}
-.ripple-ring{position:absolute;width:100%;height:100%;border-radius:50%;animation:ripple 2s ease-out infinite}
+@keyframes ripple{0%{transform:scale(1);opacity:0.5}100%{transform:scale(2.8);opacity:0}}
 </style>
 </head>
 <body>
 <div id="root"></div>
+
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+
+<!-- Capacitor core — se inyecta automáticamente al compilar -->
 <script>
-window.addEventListener('load',function(){
+// Si no estamos en Capacitor (ej: browser), creamos un stub
+if(typeof window.Capacitor === 'undefined') {
+  window.Capacitor = { isNativePlatform: ()=>false };
+}
+</script>
 
-// ── PWA INSTALL ───────────────────────────────────────────────────────────────
-let deferredPrompt = null;
-window.addEventListener('beforeinstallprompt', ev => {
-  ev.preventDefault();
-  deferredPrompt = ev;
-  // React state update via global flag
-  window._pwaReady = true;
-  window._pwaDispatch && window._pwaDispatch();
-});
-window.addEventListener('appinstalled', () => {
-  deferredPrompt = null;
-  window._pwaReady = false;
-  window._pwaDispatch && window._pwaDispatch();
-});
-
-const e=React.createElement;
-const {useState,useEffect,useRef}=React;
+<script>
+window.addEventListener('load', function(){
+const h = React.createElement;
+const {useState,useEffect,useRef} = React;
 
 // ── FIREBASE ──────────────────────────────────────────────────────────────────
 firebase.initializeApp({
@@ -57,94 +46,104 @@ firebase.initializeApp({
   messagingSenderId:"109493302154",
   appId:"1:109493302154:web:ec1c4be9b9e9973f34ce73"
 });
-const db=firebase.firestore();
+const db = firebase.firestore();
 
-// ── FLETEROS ──────────────────────────────────────────────────────────────────
-const FL=[
+// ── CONFIG ────────────────────────────────────────────────────────────────────
+const FL = [
   {id:'jorge',    nombre:'Jorge',    color:'#00c896'},
   {id:'jorgejr',  nombre:'Jorge Jr', color:'#3b82f6'},
   {id:'jonathan', nombre:'Jonathan', color:'#f59e0b'},
 ];
-const CBA=[-31.4167,-64.1833];
+const CBA = [-31.4167, -64.1833];
 
-// ── ESTILOS BASE ──────────────────────────────────────────────────────────────
-const page={minHeight:'100dvh',background:'#0f1c2e',color:'#f0f4f8',display:'flex',flexDirection:'column',fontFamily:"'DM Sans',sans-serif"};
-const card={background:'#1e3148',border:'1px solid rgba(255,255,255,0.08)',borderRadius:20,padding:'18px 20px',cursor:'pointer',display:'flex',alignItems:'center',gap:16,textAlign:'left'};
+// ── GPS — usa Capacitor en app nativa, navigator en browser ──────────────────
+let gpsWatchId = null;
+
+async function startGPS(onPos, onErr) {
+  // Limpiar cualquier watch anterior antes de empezar
+  await stopGPS();
+  const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
+  if (isNative) {
+    try {
+      const { Geolocation } = Capacitor.Plugins;
+      const perm = await Geolocation.requestPermissions();
+      if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
+        onErr({ code: 1, message: 'Permiso denegado' }); return;
+      }
+      gpsWatchId = await Geolocation.watchPosition(
+        { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 },
+        (pos, err) => {
+          if (err) { onErr(err); return; }
+          if (pos) onPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+        }
+      );
+      return;
+    } catch(e) { console.warn('Capacitor GPS error, usando fallback:', e); }
+  }
+  // Fallback browser
+  if (!navigator.geolocation) { onErr({ code: 99, message: 'GPS no disponible' }); return; }
+  gpsWatchId = navigator.geolocation.watchPosition(
+    p => onPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
+    onErr,
+    { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 }
+  );
+}
+
+async function stopGPS() {
+  if (gpsWatchId === null) return;
+  const id = gpsWatchId;
+  gpsWatchId = null; // limpiar primero para evitar race conditions
+  const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
+  if (isNative) {
+    try { const { Geolocation } = Capacitor.Plugins; await Geolocation.clearWatch({ id }); } catch(e) {}
+  } else {
+    try { navigator.geolocation.clearWatch(id); } catch(e) {}
+  }
+  // Pequeña pausa para que el sistema libere el GPS
+  await new Promise(r => setTimeout(r, 500));
+}
+
+// ── ESTILOS ───────────────────────────────────────────────────────────────────
+const page = {minHeight:'100dvh',background:'#0f1c2e',color:'#f0f4f8',display:'flex',flexDirection:'column'};
+const cardBtn = {background:'#1e3148',border:'1px solid rgba(255,255,255,0.08)',borderRadius:20,padding:'18px 20px',cursor:'pointer',display:'flex',alignItems:'center',gap:16,textAlign:'left',width:'100%'};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // INICIO
 // ══════════════════════════════════════════════════════════════════════════════
 function Inicio({onSelect}){
-  const [showInstall,setShowInstall]=useState(false);
-  function instalarNativo(){
-    if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.userChoice.then(()=>{deferredPrompt=null;setShowInstall(false);});}
-  }
-  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
-  const isAndroid=/android/i.test(navigator.userAgent);
-  return e('div',{style:{...page,alignItems:'center',justifyContent:'center',padding:24}},
-    e('div',{style:{textAlign:'center',marginBottom:44}},
-      // QUIRGROUP Logo
-      e('div',{style:{display:'inline-flex',alignItems:'center',gap:10,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:16,padding:'10px 20px',marginBottom:20}},
-        e('div',{style:{width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,#00c896,#0ea5e9)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:900,color:'white',letterSpacing:'-1px',fontFamily:"'DM Sans',sans-serif"}},'Q'),
-        e('div',{style:{textAlign:'left'}},
-          e('div',{style:{fontSize:15,fontWeight:700,color:'#f0f4f8',letterSpacing:'0.5px',fontFamily:"'DM Sans',sans-serif"}},'QUIRGROUP'),
-          e('div',{style:{fontSize:10,color:'#94a3b8',letterSpacing:'1px',fontFamily:"'DM Sans',sans-serif"}},'LOGÍSTICA')
+  return h('div',{style:{...page,alignItems:'center',justifyContent:'center',padding:24}},
+    // Logo QUIRGROUP
+    h('div',{style:{textAlign:'center',marginBottom:44}},
+      h('div',{style:{display:'inline-flex',alignItems:'center',gap:10,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:16,padding:'10px 20px',marginBottom:18}},
+        h('div',{style:{width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,#00c896,#0ea5e9)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:900,color:'white',fontFamily:"'DM Sans',sans-serif"}},'Q'),
+        h('div',{style:{textAlign:'left'}},
+          h('div',{style:{fontSize:15,fontWeight:700,color:'#f0f4f8',letterSpacing:'0.5px',fontFamily:"'DM Sans',sans-serif"}},'QUIRGROUP'),
+          h('div',{style:{fontSize:10,color:'#94a3b8',letterSpacing:'1px',fontFamily:"'DM Sans',sans-serif"}},'LOGÍSTICA')
         )
       ),
-      e('div',{style:{fontSize:42,marginBottom:8}},'🚛'),
-      e('div',{style:{fontSize:26,fontWeight:700,color:'#00c896',letterSpacing:'-0.5px',fontFamily:"'DM Sans',sans-serif"}},'FleteRuta'),
-      e('div',{style:{fontSize:13,color:'#94a3b8',marginTop:6}},'Seguimiento GPS en tiempo real'),
-      // Botón instalar — siempre visible
-      e('button',{onClick:()=>setShowInstall(true),style:{marginTop:18,padding:'10px 22px',background:'linear-gradient(135deg,#00c896,#0ea5e9)',color:'white',border:'none',borderRadius:12,fontSize:13,fontWeight:700,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:8,fontFamily:"'DM Sans',sans-serif",boxShadow:'0 4px 20px rgba(0,200,150,0.3)'}},'📲 Instalar en el celular')
+      h('div',{style:{fontSize:42,marginBottom:8}},'🚛'),
+      h('div',{style:{fontSize:26,fontWeight:700,color:'#00c896',fontFamily:"'DM Sans',sans-serif"}},'FleteRuta'),
+      h('div',{style:{fontSize:13,color:'#94a3b8',marginTop:6}},'GPS en tiempo real')
     ),
-    showInstall&&e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',zIndex:999,fontFamily:"'DM Sans',sans-serif"}},
-      e('div',{style:{background:'#1e3148',borderRadius:'24px 24px 0 0',padding:'28px 24px 44px',width:'100%',border:'1px solid rgba(255,255,255,0.1)'}},
-        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}},
-          e('div',{style:{fontSize:17,fontWeight:700,color:'#f0f4f8'}},'Instalar FleteRuta'),
-          e('button',{onClick:()=>setShowInstall(false),style:{background:'none',border:'none',color:'#94a3b8',fontSize:24,cursor:'pointer',lineHeight:1}},'×')
-        ),
-        // Android con prompt nativo
-        deferredPrompt&&e('button',{onClick:instalarNativo,style:{width:'100%',padding:'14px',background:'linear-gradient(135deg,#00c896,#0ea5e9)',color:'white',border:'none',borderRadius:14,fontSize:15,fontWeight:700,cursor:'pointer',marginBottom:16,fontFamily:"'DM Sans',sans-serif"}},'📲 Instalar ahora'),
-        // Instrucciones Android
-        isAndroid&&!deferredPrompt&&e('div',{style:{background:'rgba(0,200,150,0.08)',border:'1px solid rgba(0,200,150,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:12}},
-          e('div',{style:{fontSize:13,fontWeight:700,color:'#00c896',marginBottom:8}},'En Chrome Android:'),
-          ...['1. Tocá el menú ⋮ (tres puntos arriba a la derecha)','2. Tocá "Añadir a pantalla de inicio"','3. Confirmá tocando "Añadir"'].map((t,i)=>
-            e('div',{key:i,style:{fontSize:13,color:'#94a3b8',marginBottom:4,lineHeight:1.5}},t)
-          )
-        ),
-        // Instrucciones iPhone
-        isIOS&&e('div',{style:{background:'rgba(59,130,246,0.08)',border:'1px solid rgba(59,130,246,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:12}},
-          e('div',{style:{fontSize:13,fontWeight:700,color:'#3b82f6',marginBottom:8}},'En Safari iPhone:'),
-          ...['1. Tocá el botón compartir □↑ (abajo al centro)','2. Deslizá y tocá "Añadir a pantalla de inicio"','3. Tocá "Añadir" arriba a la derecha'].map((t,i)=>
-            e('div',{key:i,style:{fontSize:13,color:'#94a3b8',marginBottom:4,lineHeight:1.5}},t)
-          )
-        ),
-        // Genérico desktop
-        !isAndroid&&!isIOS&&e('div',{style:{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:14,padding:'14px 16px'}},
-          e('div',{style:{fontSize:13,color:'#94a3b8',lineHeight:1.7}},'En Chrome: buscá el ícono 📥 en la barra de direcciones o menú → "Instalar FleteRuta"')
-        )
-      )
-    ),
-    e('div',{style:{display:'flex',flexDirection:'column',gap:12,width:'100%',maxWidth:320}},
-      // Oficina
-      e('button',{onClick:()=>onSelect('oficina'),style:{...card,border:'1px solid rgba(0,200,150,0.25)'}},
-        e('span',{style:{fontSize:38}},'🏢'),
-        e('div',null,
-          e('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},'Ver mapa — Oficina'),
-          e('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3,fontFamily:"'DM Sans',sans-serif"}},'Los 3 fleteros en tiempo real')
+    // Botones
+    h('div',{style:{display:'flex',flexDirection:'column',gap:12,width:'100%',maxWidth:320}},
+      h('button',{onClick:()=>onSelect('oficina'),style:{...cardBtn,border:'1px solid rgba(0,200,150,0.25)'}},
+        h('span',{style:{fontSize:36}},'🏢'),
+        h('div',null,
+          h('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},'Ver mapa'),
+          h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3,fontFamily:"'DM Sans',sans-serif"}},'Los 3 fleteros en vivo')
         )
       ),
-      // Fleteros
       ...FL.map(f=>
-        e('button',{key:f.id,onClick:()=>onSelect(f),style:{...card,border:`1px solid ${f.color}35`}},
-          e('div',{style:{width:46,height:46,borderRadius:'50%',background:`${f.color}18`,border:`2.5px solid ${f.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:f.color,flexShrink:0}},
+        h('button',{key:f.id,onClick:()=>onSelect(f),style:{...cardBtn,border:`1px solid ${f.color}35`}},
+          h('div',{style:{width:46,height:46,borderRadius:'50%',background:`${f.color}18`,border:`2.5px solid ${f.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:f.color,flexShrink:0,fontFamily:"'DM Sans',sans-serif"}},
             f.nombre.slice(0,2).toUpperCase()
           ),
-          e('div',null,
-            e('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},f.nombre),
-            e('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3,fontFamily:"'DM Sans',sans-serif"}},'Activar mi GPS')
+          h('div',{style:{flex:1}},
+            h('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},f.nombre),
+            h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3,fontFamily:"'DM Sans',sans-serif"}},'Activar mi GPS')
           ),
-          e('div',{style:{marginLeft:'auto',width:10,height:10,borderRadius:'50%',background:f.color,opacity:0.4,flexShrink:0}})
+          h('div',{style:{width:10,height:10,borderRadius:'50%',background:f.color,opacity:0.4,flexShrink:0}})
         )
       )
     )
@@ -164,64 +163,78 @@ function MapaOficina({onBack}){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map);
     L.control.zoom({position:'bottomright'}).addTo(map);
 
+    // Limpiar markers de fleteros inactivos cada 30 seg
+    const TIMEOUT_MS = 60000; // 60 segundos sin señal = se oculta
+    const cleanupInterval = setInterval(()=>{
+      const ahora = Date.now();
+      Object.keys(mkrs.current).forEach(id=>{
+        const ts = window._lastGpsSeen && window._lastGpsSeen[id];
+        if(ts && ahora - ts > TIMEOUT_MS){
+          mkrs.current[id].remove();
+          delete mkrs.current[id];
+          setEstados(prev=>{ const n={...prev}; delete n[id]; return n; });
+        }
+      });
+    },10000);
+
     const unsub=db.collection('posiciones').onSnapshot(snap=>{
       const est={};
+      if(!window._lastGpsSeen) window._lastGpsSeen={};
       snap.forEach(doc=>{
         const d=doc.data(),fl=FL.find(f=>f.id===doc.id);
         if(!fl||!d.lat)return;
+        window._lastGpsSeen[doc.id]=Date.now();
         est[doc.id]=true;
         const ico=L.divIcon({className:'',
           html:`<div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center">
-            <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:${fl.color};animation:ripple 2s ease-out infinite;opacity:0.35"></div>
-            <div style="width:34px;height:34px;border-radius:50%;background:${fl.color};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;box-shadow:0 2px 12px rgba(0,0,0,0.5);position:relative;z-index:1;font-family:'DM Sans',sans-serif">
-              ${fl.nombre.slice(0,2).toUpperCase()}
-            </div>
+            <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:${fl.color};animation:ripple 2s ease-out infinite;opacity:0.3"></div>
+            <div style="width:34px;height:34px;border-radius:50%;background:${fl.color};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;box-shadow:0 2px 12px rgba(0,0,0,0.5);position:relative;z-index:1;font-family:'DM Sans',sans-serif">${fl.nombre.slice(0,2).toUpperCase()}</div>
           </div>`,
           iconSize:[44,44],iconAnchor:[22,22]});
         if(mkrs.current[doc.id]){
           mkrs.current[doc.id].setLatLng([d.lat,d.lng]);
+          mkrs.current[doc.id].setIcon(ico);
+          mkrs.current[doc.id].update();
         }else{
-          mkrs.current[doc.id]=L.marker([d.lat,d.lng],{icon:ico,zIndexOffset:1000})
-            .addTo(map).bindPopup(`<b>🚐 ${fl.nombre}</b>`);
+          mkrs.current[doc.id]=L.marker([d.lat,d.lng],{icon:ico,zIndexOffset:1000}).addTo(map).bindPopup(`<b>🚐 ${fl.nombre}</b>`);
         }
+        map.invalidateSize();
       });
       setEstados(est);
     });
-    return()=>{unsub();map.remove();mapRef.current=null;};
+    return()=>{unsub();clearInterval(cleanupInterval);map.remove();mapRef.current=null;window._lastGpsSeen={};};
   },[]);
 
   function centrar(id){
     const m=mkrs.current[id];
-    if(m&&mapRef.current){mapRef.current.setView(m.getLatLng(),17,{animate:true});m.openPopup();}
+    if(m&&mapRef.current)mapRef.current.setView(m.getLatLng(),17,{animate:true});
   }
 
   const activos=FL.filter(f=>estados[f.id]);
 
-  return e('div',{style:{height:'100dvh',display:'flex',flexDirection:'column'}},
-    // Topbar
-    e('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',gap:10,flexShrink:0,zIndex:50}},
-      e('button',{onClick:onBack,style:{background:'none',border:'none',color:'#94a3b8',fontSize:22,cursor:'pointer'}},'‹'),
-      e('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},'Mapa en vivo'),
-      e('span',{style:{marginLeft:'auto',fontSize:12,color:'#94a3b8'}},activos.length+' activo'+(activos.length!==1?'s':''))
+  return h('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',fontFamily:"'DM Sans',sans-serif"}},
+    h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',gap:10,flexShrink:0}},
+      h('button',{onClick:onBack,style:{background:'none',border:'none',color:'#94a3b8',fontSize:22,cursor:'pointer'}},'‹'),
+      // Mini logo
+      h('div',{style:{width:26,height:26,borderRadius:7,background:'linear-gradient(135deg,#00c896,#0ea5e9)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:900,color:'white'}},'Q'),
+      h('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8'}},'Mapa en vivo'),
+      h('span',{style:{marginLeft:'auto',fontSize:12,color:'#94a3b8'}},activos.length+' activo'+(activos.length!==1?'s':''))
     ),
-    // Chips
-    e('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',padding:'8px 12px',display:'flex',gap:8,flexShrink:0}},
+    h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',padding:'8px 12px',display:'flex',gap:8,flexShrink:0}},
       ...FL.map(f=>{
         const activo=estados[f.id];
-        return e('button',{key:f.id,onClick:()=>centrar(f.id),
+        return h('button',{key:f.id,onClick:()=>centrar(f.id),
           style:{padding:'7px 16px',borderRadius:20,border:`1.5px solid ${activo?f.color:'rgba(255,255,255,0.1)'}`,background:activo?`${f.color}18`:'transparent',color:activo?f.color:'#4a6080',fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontFamily:"'DM Sans',sans-serif"}},
-          e('span',{style:{width:8,height:8,borderRadius:'50%',background:activo?f.color:'#4a6080',display:'inline-block',animation:activo?'pulse 2s infinite':'none'}}),
+          h('span',{style:{width:8,height:8,borderRadius:'50%',background:activo?f.color:'#4a6080',display:'inline-block',animation:activo?'pulse 2s infinite':'none'}}),
           f.nombre
         );
       })
     ),
-    // Mapa
-    e('div',{ref:mapDiv,style:{flex:1}}),
-    // Sin activos
-    activos.length===0&&e('div',{style:{position:'absolute',bottom:28,left:16,right:16,zIndex:100,background:'rgba(15,28,46,0.96)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:18,padding:'18px',textAlign:'center'}},
-      e('div',{style:{fontSize:28,marginBottom:8}},'📡'),
-      e('div',{style:{fontSize:14,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},'Ningún fletero activo'),
-      e('div',{style:{fontSize:12,color:'#94a3b8',marginTop:4}},'Cuando activen el GPS aparecen en el mapa')
+    h('div',{ref:mapDiv,style:{flex:1}}),
+    activos.length===0&&h('div',{style:{position:'absolute',bottom:28,left:16,right:16,zIndex:100,background:'rgba(15,28,46,0.96)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:18,padding:'18px',textAlign:'center',fontFamily:"'DM Sans',sans-serif"}},
+      h('div',{style:{fontSize:28,marginBottom:8}},'📡'),
+      h('div',{style:{fontSize:14,fontWeight:700,color:'#f0f4f8'}},'Ningún fletero activo'),
+      h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:4}},'Cuando activen el GPS aparecen acá')
     )
   );
 }
@@ -233,111 +246,113 @@ function PantallaFletero({fl,onBack}){
   const [gpsOn,setGpsOn]=useState(false);
   const [error,setError]=useState('');
   const [pos,setPos]=useState(null);
-  const watchRef=useRef(null);
-  const wakeLock=useRef(null);
 
-  async function pedirWakeLock(){
-    try{
-      if('wakeLock' in navigator){
-        wakeLock.current=await navigator.wakeLock.request('screen');
-        document.addEventListener('visibilitychange',async()=>{
-          if(document.visibilityState==='visible')
-            try{wakeLock.current=await navigator.wakeLock.request('screen');}catch(e){}
-        });
-      }
-    }catch(e){}
-  }
+  const lastPosRef = useRef(null);
+  const intervalRef = useRef(null);
 
   function activar(){
-    if(!navigator.geolocation){setError('GPS no disponible en este dispositivo');return;}
     setError('');
-    pedirWakeLock();
-    watchRef.current=navigator.geolocation.watchPosition(
-      p=>{
-        const{latitude:lat,longitude:lng}=p.coords;
+    startGPS(
+      ({lat,lng})=>{
         setGpsOn(true);
+        lastPosRef.current = {lat,lng};
         setPos({lat,lng,hora:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})});
-        db.collection('posiciones').doc(fl.id).set({lat,lng,nombre:fl.nombre,ts:firebase.firestore.FieldValue.serverTimestamp()});
+        db.collection('posiciones').doc(fl.id).set({
+          lat,lng,nombre:fl.nombre,
+          ts:firebase.firestore.FieldValue.serverTimestamp()
+        });
       },
       err=>{
-        if(err.code===1)setError('Permiso GPS denegado. Habilitalo en Configuración del navegador.');
-        else if(err.code===2)setError('Sin señal GPS. ¿Estás en un lugar cerrado?');
-        else{setError('GPS timeout, reintentando...');setTimeout(()=>{if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);activar();},3000);}
+        if(err.code===1)setError('Permiso GPS denegado. Habilitalo en Configuración.');
+        else if(err.code===2)setError('Sin señal GPS.');
+        else setError('Error GPS: '+err.message);
         setGpsOn(false);
-      },
-      {enableHighAccuracy:true,maximumAge:3000,timeout:20000}
+      }
     );
+    // Forzar subida a Firebase cada 5 segundos aunque no haya movimiento
+    intervalRef.current = setInterval(()=>{
+      if(lastPosRef.current){
+        db.collection('posiciones').doc(fl.id).set({
+          lat:lastPosRef.current.lat,
+          lng:lastPosRef.current.lng,
+          nombre:fl.nombre,
+          ts:firebase.firestore.FieldValue.serverTimestamp()
+        });
+      }
+    }, 5000);
   }
 
-  function desactivar(){
-    if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);
-    if(wakeLock.current)wakeLock.current.release().catch(()=>{});
-    db.collection('posiciones').doc(fl.id).delete();
-    setGpsOn(false);setPos(null);
+  async function desactivar(){
+    clearInterval(intervalRef.current);
+    await stopGPS();
+    try { await db.collection('posiciones').doc(fl.id).delete(); } catch(e){}
+    setGpsOn(false);
+    setPos(null);
+    lastPosRef.current = null;
   }
 
-  useEffect(()=>()=>{if(watchRef.current)navigator.geolocation.clearWatch(watchRef.current);},[]);
+  useEffect(()=>()=>{ clearInterval(intervalRef.current); stopGPS(); },[]);
 
-  return e('div',{style:{...page}},
+  const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
+
+  return h('div',{style:page},
     // Banner GPS activo
-    gpsOn&&e('div',{style:{background:`${fl.color}15`,borderBottom:`1px solid ${fl.color}40`,padding:'8px 16px',display:'flex',alignItems:'center',gap:8}},
-      e('span',{style:{width:8,height:8,borderRadius:'50%',background:fl.color,display:'inline-block',animation:'pulse 1.5s infinite'}}),
-      e('span',{style:{fontSize:12,color:fl.color,fontWeight:600}},'GPS activo · pantalla sin bloqueo'),
-      e('span',{style:{fontSize:11,color:'#94a3b8',marginLeft:'auto'}},'No cerrés la app')
+    gpsOn&&h('div',{style:{background:`${fl.color}15`,borderBottom:`1px solid ${fl.color}40`,padding:'8px 16px',display:'flex',alignItems:'center',gap:8}},
+      h('span',{style:{width:8,height:8,borderRadius:'50%',background:fl.color,display:'inline-block',animation:'pulse 1.5s infinite'}}),
+      h('span',{style:{fontSize:12,color:fl.color,fontWeight:600}},isNative?'GPS activo en segundo plano ✓':'GPS activo · no cerrés la app'),
+      h('span',{style:{fontSize:11,color:'#94a3b8',marginLeft:'auto'}},isNative?'Podés usar WhatsApp':'Mantené abierto')
     ),
     // Topbar
-    e('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}},
-      e('div',{style:{display:'flex',alignItems:'center',gap:10}},
-        e('button',{onClick:onBack,style:{background:'none',border:'none',color:'#94a3b8',fontSize:22,cursor:'pointer'}},'‹'),
-        e('div',{style:{width:34,height:34,borderRadius:'50%',background:`${fl.color}20`,border:`2px solid ${fl.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:fl.color}},fl.nombre.slice(0,2).toUpperCase()),
-        e('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8'}},fl.nombre)
+    h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}},
+      h('div',{style:{display:'flex',alignItems:'center',gap:10}},
+        h('button',{onClick:onBack,style:{background:'none',border:'none',color:'#94a3b8',fontSize:22,cursor:'pointer'}},'‹'),
+        h('div',{style:{width:34,height:34,borderRadius:'50%',background:`${fl.color}20`,border:`2px solid ${fl.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:fl.color,fontFamily:"'DM Sans',sans-serif"}},fl.nombre.slice(0,2).toUpperCase()),
+        h('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},fl.nombre)
       ),
-      e('span',{style:{fontSize:11,padding:'3px 10px',borderRadius:20,background:gpsOn?`${fl.color}20`:'rgba(245,158,11,0.15)',color:gpsOn?fl.color:'#f59e0b',fontWeight:600}},gpsOn?'En línea':'Desconectado')
+      h('span',{style:{fontSize:11,padding:'3px 10px',borderRadius:20,background:gpsOn?`${fl.color}20`:'rgba(245,158,11,0.15)',color:gpsOn?fl.color:'#f59e0b',fontWeight:600}},gpsOn?'En línea':'Desconectado')
     ),
     // Cuerpo
-    e('div',{style:{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:32,gap:28}},
-      // Botón GPS grande
-      e('div',{style:{position:'relative',width:160,height:160,display:'flex',alignItems:'center',justifyContent:'center'}},
-        gpsOn&&e('div',{style:{position:'absolute',width:160,height:160,borderRadius:'50%',background:fl.color,animation:'ripple 2s ease-out infinite',opacity:0.2}}),
-        gpsOn&&e('div',{style:{position:'absolute',width:160,height:160,borderRadius:'50%',background:fl.color,animation:'ripple 2s ease-out 1s infinite',opacity:0.15}}),
-        e('button',{onClick:gpsOn?desactivar:activar,style:{
+    h('div',{style:{flex:1,display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',padding:32,gap:28}},
+      // Botón GPS
+      h('div',{style:{position:'relative',width:160,height:160,display:'flex',alignItems:'center',justifyContent:'center'}},
+        gpsOn&&h('div',{style:{position:'absolute',width:160,height:160,borderRadius:'50%',background:fl.color,animation:'ripple 2.5s ease-out infinite',opacity:0.2}}),
+        gpsOn&&h('div',{style:{position:'absolute',width:160,height:160,borderRadius:'50%',background:fl.color,animation:'ripple 2.5s ease-out 1.2s infinite',opacity:0.15}}),
+        h('button',{onClick:gpsOn?desactivar:activar,style:{
           width:150,height:150,borderRadius:'50%',
           border:`4px solid ${gpsOn?fl.color:'rgba(255,255,255,0.12)'}`,
           background:gpsOn?`${fl.color}15`:'rgba(255,255,255,0.03)',
           cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,
-          position:'relative',zIndex:1,transition:'all .3s'
+          position:'relative',zIndex:1,transition:'all .3s',fontFamily:"'DM Sans',sans-serif"
         }},
-          e('span',{style:{fontSize:52}},gpsOn?'📍':'🔌'),
-          e('span',{style:{fontSize:14,fontWeight:700,color:gpsOn?fl.color:'#94a3b8',fontFamily:"'DM Sans',sans-serif"}},gpsOn?'Activo':'Activar GPS')
+          h('span',{style:{fontSize:52}},gpsOn?'📍':'🔌'),
+          h('span',{style:{fontSize:14,fontWeight:700,color:gpsOn?fl.color:'#94a3b8',fontFamily:"'DM Sans',sans-serif"}},gpsOn?'Activo':'Activar GPS')
         )
       ),
       // Última posición
-      pos&&e('div',{style:{background:'#1e3148',border:`1px solid ${fl.color}30`,borderRadius:16,padding:'14px 20px',textAlign:'center',width:'100%',maxWidth:280}},
-        e('div',{style:{fontSize:11,color:'#94a3b8',marginBottom:4}},'Última actualización'),
-        e('div',{style:{fontSize:18,fontWeight:700,color:'#f0f4f8'}},pos.hora),
-        e('div',{style:{fontSize:11,color:'#4a6080',marginTop:4}},pos.lat.toFixed(5)+', '+pos.lng.toFixed(5))
+      pos&&h('div',{style:{background:'#1e3148',border:`1px solid ${fl.color}30`,borderRadius:16,padding:'14px 20px',textAlign:'center',width:'100%',maxWidth:280,fontFamily:"'DM Sans',sans-serif"}},
+        h('div',{style:{fontSize:11,color:'#94a3b8',marginBottom:4}},'Última actualización'),
+        h('div',{style:{fontSize:20,fontWeight:700,color:'#f0f4f8'}},pos.hora),
+        h('div',{style:{fontSize:11,color:'#4a6080',marginTop:4}},pos.lat.toFixed(5)+', '+pos.lng.toFixed(5))
       ),
-      // Error
-      error&&e('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:12,padding:'12px 16px',fontSize:13,color:'#ef4444',textAlign:'center',maxWidth:300}},error),
-      // Instrucción
-      !gpsOn&&!error&&e('div',{style:{fontSize:13,color:'#4a6080',textAlign:'center',maxWidth:260,lineHeight:1.7}},
-        'Tocá el botón para activar el GPS.',e('br'),'La oficina te ve en el mapa al instante.'
+      error&&h('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:12,padding:'12px 16px',fontSize:13,color:'#ef4444',textAlign:'center',maxWidth:300,fontFamily:"'DM Sans',sans-serif"}},error),
+      !gpsOn&&!error&&h('div',{style:{fontSize:13,color:'#4a6080',textAlign:'center',maxWidth:260,lineHeight:1.7,fontFamily:"'DM Sans',sans-serif"}},
+        'Tocá el botón para activar el GPS.',
+        isNative ? h('span',{style:{color:'#00c896',display:'block',marginTop:6,fontWeight:600}},'✓ GPS funciona en segundo plano') : h('br'),
+        isNative ? 'Podés usar WhatsApp normalmente.' : 'La oficina te ve en el mapa al instante.'
       )
     )
   );
 }
 
-// ══════════════════════════════════════════════════════════════════════════════
 // ROOT
-// ══════════════════════════════════════════════════════════════════════════════
 function App(){
-  const [pantalla,setPantalla]=useState('inicio');
-  if(pantalla==='inicio')return e(Inicio,{onSelect:p=>setPantalla(p)});
-  if(pantalla==='oficina')return e(MapaOficina,{onBack:()=>setPantalla('inicio')});
-  return e(PantallaFletero,{fl:pantalla,onBack:()=>setPantalla('inicio')});
+  const [p,setP]=useState('inicio');
+  if(p==='inicio')return h(Inicio,{onSelect:x=>setP(x)});
+  if(p==='oficina')return h(MapaOficina,{onBack:()=>setP('inicio')});
+  return h(PantallaFletero,{fl:p,onBack:()=>setP('inicio')});
 }
 
-ReactDOM.createRoot(document.getElementById('root')).render(e(App,null));
+ReactDOM.createRoot(document.getElementById('root')).render(h(App,null));
 });
 </script>
 </body>
