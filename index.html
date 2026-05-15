@@ -4,6 +4,7 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <meta name="theme-color" content="#0f1c2e"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
 <title>FleteRuta</title>
 <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;600;700&display=swap" rel="stylesheet"/>
 <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css"/>
@@ -17,27 +18,16 @@ body{font-family:'DM Sans',sans-serif;overscroll-behavior:none}
 </head>
 <body>
 <div id="root"></div>
-
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
-
-<!-- Capacitor core — se inyecta automáticamente al compilar -->
 <script>
-// Si no estamos en Capacitor (ej: browser), creamos un stub
-if(typeof window.Capacitor === 'undefined') {
-  window.Capacitor = { isNativePlatform: ()=>false };
-}
-</script>
+window.addEventListener('load',function(){
+const h=React.createElement;
+const {useState,useEffect,useRef}=React;
 
-<script>
-window.addEventListener('load', function(){
-const h = React.createElement;
-const {useState,useEffect,useRef} = React;
-
-// ── FIREBASE ──────────────────────────────────────────────────────────────────
 firebase.initializeApp({
   apiKey:"AIzaSyDBpTLWkYT5jxW71o6gJjQYCiG-zYlTKMA",
   authDomain:"retirodefinitivofleteros.firebaseapp.com",
@@ -46,102 +36,65 @@ firebase.initializeApp({
   messagingSenderId:"109493302154",
   appId:"1:109493302154:web:ec1c4be9b9e9973f34ce73"
 });
-const db = firebase.firestore();
+const db=firebase.firestore();
 
-// ── CONFIG ────────────────────────────────────────────────────────────────────
-const FL = [
+const FL=[
   {id:'jorge',    nombre:'Jorge',    color:'#00c896'},
   {id:'jorgejr',  nombre:'Jorge Jr', color:'#3b82f6'},
   {id:'jonathan', nombre:'Jonathan', color:'#f59e0b'},
 ];
-const CBA = [-31.4167, -64.1833];
+const CBA=[-31.4167,-64.1833];
 
-// ── GPS — usa Capacitor en app nativa, navigator en browser ──────────────────
-let gpsWatchId = null;
+// ── NATIVE GPS BRIDGE ─────────────────────────────────────────────────────────
+function isNative(){return window.Capacitor&&window.Capacitor.isNativePlatform();}
 
-async function startGPS(onPos, onErr) {
-  // Limpiar cualquier watch anterior antes de empezar
-  await stopGPS();
-  const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
-  if (isNative) {
-    try {
-      const { Geolocation } = Capacitor.Plugins;
-      const perm = await Geolocation.requestPermissions();
-      if (perm.location !== 'granted' && perm.coarseLocation !== 'granted') {
-        onErr({ code: 1, message: 'Permiso denegado' }); return;
-      }
-      gpsWatchId = await Geolocation.watchPosition(
-        { enableHighAccuracy: true, timeout: 30000, maximumAge: 3000 },
-        (pos, err) => {
-          if (err) { onErr(err); return; }
-          if (pos) onPos({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-        }
-      );
-      return;
-    } catch(e) { console.warn('Capacitor GPS error, usando fallback:', e); }
-  }
-  // Fallback browser
-  if (!navigator.geolocation) { onErr({ code: 99, message: 'GPS no disponible' }); return; }
-  gpsWatchId = navigator.geolocation.watchPosition(
-    p => onPos({ lat: p.coords.latitude, lng: p.coords.longitude }),
-    onErr,
-    { enableHighAccuracy: true, maximumAge: 3000, timeout: 30000 }
-  );
+async function startNativeGps(fleteroId,fleteroNombre){
+  const plugin=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.GpsPlugin;
+  if(!plugin)throw new Error('Plugin no disponible');
+  await plugin.startTracking({fleteroId,fleteroNombre});
 }
 
-async function stopGPS() {
-  if (gpsWatchId === null) return;
-  const id = gpsWatchId;
-  gpsWatchId = null; // limpiar primero para evitar race conditions
-  const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
-  if (isNative) {
-    try { const { Geolocation } = Capacitor.Plugins; await Geolocation.clearWatch({ id }); } catch(e) {}
-  } else {
-    try { navigator.geolocation.clearWatch(id); } catch(e) {}
-  }
-  // Pequeña pausa para que el sistema libere el GPS
-  await new Promise(r => setTimeout(r, 500));
+async function stopNativeGps(){
+  const plugin=window.Capacitor&&Capacitor.Plugins&&Capacitor.Plugins.GpsPlugin;
+  if(!plugin)return;
+  await plugin.stopTracking({});
 }
 
 // ── ESTILOS ───────────────────────────────────────────────────────────────────
-const page = {minHeight:'100dvh',background:'#0f1c2e',color:'#f0f4f8',display:'flex',flexDirection:'column'};
-const cardBtn = {background:'#1e3148',border:'1px solid rgba(255,255,255,0.08)',borderRadius:20,padding:'18px 20px',cursor:'pointer',display:'flex',alignItems:'center',gap:16,textAlign:'left',width:'100%'};
+const page={minHeight:'100dvh',background:'#0f1c2e',color:'#f0f4f8',display:'flex',flexDirection:'column'};
+const cardBtn={background:'#1e3148',border:'1px solid rgba(255,255,255,0.08)',borderRadius:20,padding:'18px 20px',cursor:'pointer',display:'flex',alignItems:'center',gap:16,textAlign:'left',width:'100%'};
 
 // ══════════════════════════════════════════════════════════════════════════════
 // INICIO
 // ══════════════════════════════════════════════════════════════════════════════
 function Inicio({onSelect}){
   return h('div',{style:{...page,alignItems:'center',justifyContent:'center',padding:24}},
-    // Logo QUIRGROUP
     h('div',{style:{textAlign:'center',marginBottom:44}},
       h('div',{style:{display:'inline-flex',alignItems:'center',gap:10,background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.08)',borderRadius:16,padding:'10px 20px',marginBottom:18}},
-        h('div',{style:{width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,#00c896,#0ea5e9)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:900,color:'white',fontFamily:"'DM Sans',sans-serif"}},'Q'),
-        h('div',{style:{textAlign:'left'}},
-          h('div',{style:{fontSize:15,fontWeight:700,color:'#f0f4f8',letterSpacing:'0.5px',fontFamily:"'DM Sans',sans-serif"}},'QUIRGROUP'),
-          h('div',{style:{fontSize:10,color:'#94a3b8',letterSpacing:'1px',fontFamily:"'DM Sans',sans-serif"}},'LOGÍSTICA')
+        h('div',{style:{width:36,height:36,borderRadius:10,background:'linear-gradient(135deg,#00c896,#0ea5e9)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:18,fontWeight:900,color:'white'}},'Q'),
+        h('div',null,
+          h('div',{style:{fontSize:15,fontWeight:700,color:'#f0f4f8',letterSpacing:'0.5px'}},'QUIRGROUP'),
+          h('div',{style:{fontSize:10,color:'#94a3b8',letterSpacing:'1px'}},'LOGÍSTICA')
         )
       ),
       h('div',{style:{fontSize:42,marginBottom:8}},'🚛'),
-      h('div',{style:{fontSize:26,fontWeight:700,color:'#00c896',fontFamily:"'DM Sans',sans-serif"}},'FleteRuta'),
+      h('div',{style:{fontSize:26,fontWeight:700,color:'#00c896'}},'FleteRuta'),
       h('div',{style:{fontSize:13,color:'#94a3b8',marginTop:6}},'GPS en tiempo real')
     ),
-    // Botones
     h('div',{style:{display:'flex',flexDirection:'column',gap:12,width:'100%',maxWidth:320}},
       h('button',{onClick:()=>onSelect('oficina'),style:{...cardBtn,border:'1px solid rgba(0,200,150,0.25)'}},
         h('span',{style:{fontSize:36}},'🏢'),
         h('div',null,
-          h('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},'Ver mapa'),
-          h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3,fontFamily:"'DM Sans',sans-serif"}},'Los 3 fleteros en vivo')
+          h('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8'}},'Ver mapa'),
+          h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3}},'Los 3 fleteros en vivo')
         )
       ),
       ...FL.map(f=>
         h('button',{key:f.id,onClick:()=>onSelect(f),style:{...cardBtn,border:`1px solid ${f.color}35`}},
-          h('div',{style:{width:46,height:46,borderRadius:'50%',background:`${f.color}18`,border:`2.5px solid ${f.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:f.color,flexShrink:0,fontFamily:"'DM Sans',sans-serif"}},
-            f.nombre.slice(0,2).toUpperCase()
-          ),
+          h('div',{style:{width:46,height:46,borderRadius:'50%',background:`${f.color}18`,border:`2.5px solid ${f.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:15,fontWeight:700,color:f.color,flexShrink:0}},f.nombre.slice(0,2).toUpperCase()),
           h('div',{style:{flex:1}},
-            h('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},f.nombre),
-            h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3,fontFamily:"'DM Sans',sans-serif"}},'Activar mi GPS')
+            h('div',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8'}},f.nombre),
+            h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:3}},'Activar mi GPS')
           ),
           h('div',{style:{width:10,height:10,borderRadius:'50%',background:f.color,opacity:0.4,flexShrink:0}})
         )
@@ -156,6 +109,7 @@ function Inicio({onSelect}){
 function MapaOficina({onBack}){
   const mapDiv=useRef(null),mapRef=useRef(null),mkrs=useRef({});
   const [estados,setEstados]=useState({});
+  const lastSeen=useRef({});
 
   useEffect(()=>{
     const map=L.map(mapDiv.current,{zoomControl:false}).setView(CBA,13);
@@ -163,53 +117,53 @@ function MapaOficina({onBack}){
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{attribution:'© OpenStreetMap',maxZoom:19}).addTo(map);
     L.control.zoom({position:'bottomright'}).addTo(map);
 
-    // Ocultar marker si no hay señal en 15 segundos
-    const TIMEOUT_MS = 15000;
-    const cleanupInterval = setInterval(()=>{
-      const ahora = Date.now();
-      Object.keys(mkrs.current).forEach(id=>{
-        const ts = window._lastGpsSeen && window._lastGpsSeen[id];
-        if(ts && ahora - ts > TIMEOUT_MS){
-          mkrs.current[id].remove();
-          delete mkrs.current[id];
-          setEstados(prev=>{ const n={...prev}; delete n[id]; return n; });
-        }
-      });
-    },3000);
-
-    // Crear iconos una sola vez por fletero
+    // Crear iconos una sola vez
     const iconos={};
-    FL.forEach(fl=>{
-      iconos[fl.id]=L.divIcon({className:'',
+    FL.forEach(f=>{
+      iconos[f.id]=L.divIcon({className:'',
         html:`<div style="position:relative;width:44px;height:44px;display:flex;align-items:center;justify-content:center">
-          <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:${fl.color};animation:ripple 2s ease-out infinite;opacity:0.3"></div>
-          <div style="width:34px;height:34px;border-radius:50%;background:${fl.color};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;box-shadow:0 2px 12px rgba(0,0,0,0.5);position:relative;z-index:1;font-family:sans-serif">${fl.nombre.slice(0,2).toUpperCase()}</div>
+          <div style="position:absolute;width:44px;height:44px;border-radius:50%;background:${f.color};animation:ripple 2s ease-out infinite;opacity:0.3"></div>
+          <div style="width:34px;height:34px;border-radius:50%;background:${f.color};border:3px solid white;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:700;color:white;box-shadow:0 2px 12px rgba(0,0,0,0.5);position:relative;z-index:1;font-family:sans-serif">${f.nombre.slice(0,2).toUpperCase()}</div>
         </div>`,
         iconSize:[44,44],iconAnchor:[22,22]});
     });
 
+    // Escuchar Firebase en tiempo real
     const unsub=db.collection('posiciones').onSnapshot(snap=>{
       const est={};
-      if(!window._lastGpsSeen) window._lastGpsSeen={};
       snap.forEach(doc=>{
-        const d=doc.data(),fl=FL.find(f=>f.id===doc.id);
-        if(!fl||!d.lat||!d.lng)return;
-        window._lastGpsSeen[doc.id]=Date.now();
+        const d=doc.data(),f=FL.find(x=>x.id===doc.id);
+        if(!f||!d.lat||!d.lng)return;
+        // Ignorar posiciones con más de 20 segundos
+        if(d.ts){
+          const edad=(Date.now()/1000)-(d.ts.seconds||0);
+          if(edad>20)return;
+        }
+        lastSeen.current[doc.id]=Date.now();
         est[doc.id]=true;
         if(mkrs.current[doc.id]){
-          // Solo mover el marker, sin tocar el ícono
           mkrs.current[doc.id].setLatLng([d.lat,d.lng]);
         }else{
-          // Primera vez: crear el marker
-          mkrs.current[doc.id]=L.marker([d.lat,d.lng],{
-            icon:iconos[doc.id],
-            zIndexOffset:1000
-          }).addTo(map).bindPopup(`<b>🚐 ${fl.nombre}</b>`);
+          mkrs.current[doc.id]=L.marker([d.lat,d.lng],{icon:iconos[doc.id],zIndexOffset:1000})
+            .addTo(map).bindPopup(`<b>🚐 ${f.nombre}</b>`);
         }
       });
-      setEstados(prev=>({...prev,...est}));
+      setEstados(e=>({...e,...est}));
     });
-    return()=>{unsub();clearInterval(cleanupInterval);map.remove();mapRef.current=null;window._lastGpsSeen={};};
+
+    // Limpiar markers sin señal cada 5 segundos
+    const limpieza=setInterval(()=>{
+      const ahora=Date.now();
+      Object.keys(mkrs.current).forEach(id=>{
+        if(ahora-(lastSeen.current[id]||0)>15000){
+          mkrs.current[id].remove();
+          delete mkrs.current[id];
+          setEstados(e=>{const n={...e};delete n[id];return n;});
+        }
+      });
+    },5000);
+
+    return()=>{unsub();clearInterval(limpieza);map.remove();mapRef.current=null;};
   },[]);
 
   function centrar(id){
@@ -219,29 +173,28 @@ function MapaOficina({onBack}){
 
   const activos=FL.filter(f=>estados[f.id]);
 
-  return h('div',{style:{height:'100dvh',display:'flex',flexDirection:'column',fontFamily:"'DM Sans',sans-serif"}},
+  return h('div',{style:{height:'100dvh',display:'flex',flexDirection:'column'}},
     h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',gap:10,flexShrink:0}},
       h('button',{onClick:onBack,style:{background:'none',border:'none',color:'#94a3b8',fontSize:22,cursor:'pointer'}},'‹'),
-      // Mini logo
       h('div',{style:{width:26,height:26,borderRadius:7,background:'linear-gradient(135deg,#00c896,#0ea5e9)',display:'flex',alignItems:'center',justifyContent:'center',fontSize:12,fontWeight:900,color:'white'}},'Q'),
       h('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8'}},'Mapa en vivo'),
-      h('span',{style:{marginLeft:'auto',fontSize:12,color:'#94a3b8'}},activos.length+' activo'+(activos.length!==1?'s':''))
+      h('span',{style:{marginLeft:'auto',fontSize:12,color:activos.length>0?'#00c896':'#94a3b8'}},activos.length+' activo'+(activos.length!==1?'s':''))
     ),
     h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',padding:'8px 12px',display:'flex',gap:8,flexShrink:0}},
       ...FL.map(f=>{
         const activo=estados[f.id];
-        const segs=window._lastGpsSeen&&window._lastGpsSeen[f.id]?Math.round((Date.now()-window._lastGpsSeen[f.id])/1000):null;
-        const tiempoStr=activo&&segs!==null?(segs<5?'ahora':segs+'s'):null;
+        const segs=lastSeen.current[f.id]?Math.round((Date.now()-lastSeen.current[f.id])/1000):null;
+        const tiempo=activo&&segs!==null?(segs<3?'ahora':segs+'s'):null;
         return h('button',{key:f.id,onClick:()=>centrar(f.id),
-          style:{padding:'7px 16px',borderRadius:20,border:`1.5px solid ${activo?f.color:'rgba(255,255,255,0.1)'}`,background:activo?`${f.color}18`:'transparent',color:activo?f.color:'#4a6080',fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:7,fontFamily:"'DM Sans',sans-serif"}},
+          style:{padding:'7px 16px',borderRadius:20,border:`1.5px solid ${activo?f.color:'rgba(255,255,255,0.1)'}`,background:activo?`${f.color}18`:'transparent',color:activo?f.color:'#4a6080',fontSize:13,fontWeight:600,cursor:'pointer',display:'flex',alignItems:'center',gap:7,transition:'all .3s'}},
           h('span',{style:{width:8,height:8,borderRadius:'50%',background:activo?f.color:'#4a6080',display:'inline-block',animation:activo?'pulse 2s infinite':'none'}}),
           f.nombre,
-          tiempoStr&&h('span',{style:{fontSize:10,opacity:0.7,fontWeight:400}},tiempoStr)
+          tiempo&&h('span',{style:{fontSize:10,opacity:0.7,fontWeight:400}},tiempo)
         );
       })
     ),
     h('div',{ref:mapDiv,style:{flex:1}}),
-    activos.length===0&&h('div',{style:{position:'absolute',bottom:28,left:16,right:16,zIndex:100,background:'rgba(15,28,46,0.96)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:18,padding:'18px',textAlign:'center',fontFamily:"'DM Sans',sans-serif"}},
+    activos.length===0&&h('div',{style:{position:'absolute',bottom:28,left:16,right:16,zIndex:100,background:'rgba(15,28,46,0.96)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:18,padding:'18px',textAlign:'center'}},
       h('div',{style:{fontSize:28,marginBottom:8}},'📡'),
       h('div',{style:{fontSize:14,fontWeight:700,color:'#f0f4f8'}},'Ningún fletero activo'),
       h('div',{style:{fontSize:12,color:'#94a3b8',marginTop:4}},'Cuando activen el GPS aparecen acá')
@@ -257,73 +210,57 @@ function PantallaFletero({fl,onBack}){
   const [error,setError]=useState('');
   const [pos,setPos]=useState(null);
 
-  const lastPosRef = useRef(null);
-  const intervalRef = useRef(null);
+  // Limpiar posición vieja al entrar
+  useEffect(()=>{
+    db.collection('posiciones').doc(fl.id).delete().catch(()=>{});
+  },[]);
 
-  function activar(){
+  async function activar(){
     setError('');
-    startGPS(
-      ({lat,lng})=>{
+    if(isNative()){
+      // Usar el servicio nativo en segundo plano
+      try{
+        await startNativeGps(fl.id,fl.nombre);
         setGpsOn(true);
-        lastPosRef.current = {lat,lng};
-        setPos({lat,lng,hora:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})});
-        db.collection('posiciones').doc(fl.id).set({
-          lat,lng,nombre:fl.nombre,
-          ts:firebase.firestore.FieldValue.serverTimestamp()
-        });
-      },
-      err=>{
-        if(err.code===1)setError('Permiso GPS denegado. Habilitalo en Configuración.');
-        else if(err.code===2)setError('Sin señal GPS. Intentando reconectar...');
-        else setError('GPS desconectado, reintentando...');
-        // Borrar de Firebase inmediatamente — no mostrar en mapa si no hay señal
-        db.collection('posiciones').doc(fl.id).delete();
-        clearInterval(intervalRef.current);
-        setGpsOn(false);
-        lastPosRef.current=null;
-        // Reintentar automáticamente en 3 segundos
-        setTimeout(()=>activar(), 3000);
+        setPos({hora:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit'})});
+      }catch(e){
+        setError('Error al iniciar GPS: '+e.message);
       }
-    );
-    // Forzar subida a Firebase cada 3 segundos
-    intervalRef.current = setInterval(()=>{
-      if(lastPosRef.current){
-        db.collection('posiciones').doc(fl.id).set({
-          lat:lastPosRef.current.lat,
-          lng:lastPosRef.current.lng,
-          nombre:fl.nombre,
-          ts:firebase.firestore.FieldValue.serverTimestamp()
-        });
-      }
-    }, 3000);
+    }else{
+      // Fallback para browser/PC
+      if(!navigator.geolocation){setError('GPS no disponible');return;}
+      navigator.geolocation.watchPosition(
+        p=>{
+          setGpsOn(true);
+          const lat=p.coords.latitude,lng=p.coords.longitude;
+          setPos({lat,lng,hora:new Date().toLocaleTimeString('es-AR',{hour:'2-digit',minute:'2-digit',second:'2-digit'})});
+          db.collection('posiciones').doc(fl.id).set({lat,lng,nombre:fl.nombre,ts:firebase.firestore.FieldValue.serverTimestamp()});
+        },
+        err=>setError('Error GPS: '+err.message),
+        {enableHighAccuracy:true,maximumAge:3000,timeout:30000}
+      );
+    }
   }
 
   async function desactivar(){
-    clearInterval(intervalRef.current);
-    await stopGPS();
-    try { await db.collection('posiciones').doc(fl.id).delete(); } catch(e){}
-    setGpsOn(false);
-    setPos(null);
-    lastPosRef.current = null;
+    if(isNative())await stopNativeGps();
+    await db.collection('posiciones').doc(fl.id).delete().catch(()=>{});
+    setGpsOn(false);setPos(null);
   }
-
-  useEffect(()=>()=>{ clearInterval(intervalRef.current); stopGPS(); },[]);
-
-  const isNative = window.Capacitor && window.Capacitor.isNativePlatform();
 
   return h('div',{style:page},
     // Banner GPS activo
     gpsOn&&h('div',{style:{background:`${fl.color}15`,borderBottom:`1px solid ${fl.color}40`,padding:'8px 16px',display:'flex',alignItems:'center',gap:8}},
       h('span',{style:{width:8,height:8,borderRadius:'50%',background:fl.color,display:'inline-block',animation:'pulse 1.5s infinite'}}),
-      h('span',{style:{fontSize:12,color:fl.color,fontWeight:600}},isNative?'GPS activo en segundo plano ✓':'GPS activo · no cerrés la app'),
-      h('span',{style:{fontSize:11,color:'#94a3b8',marginLeft:'auto'}},isNative?'Podés usar WhatsApp':'Mantené abierto')
+      h('span',{style:{fontSize:12,color:fl.color,fontWeight:600}},isNative()?'GPS activo en segundo plano ✓':'GPS activo'),
+      h('span',{style:{fontSize:11,color:'#94a3b8',marginLeft:'auto'}},isNative()?'Podés usar WhatsApp':'No cerrés la app')
     ),
     // Topbar
     h('div',{style:{background:'#162336',borderBottom:'1px solid rgba(255,255,255,0.08)',height:56,padding:'0 16px',display:'flex',alignItems:'center',justifyContent:'space-between',flexShrink:0}},
       h('div',{style:{display:'flex',alignItems:'center',gap:10}},
         h('button',{onClick:onBack,style:{background:'none',border:'none',color:'#94a3b8',fontSize:22,cursor:'pointer'}},'‹'),
-        h('div',{style:{width:34,height:34,borderRadius:'50%',background:`${fl.color}20`,border:`2px solid ${fl.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:fl.color,fontFamily:"'DM Sans',sans-serif"}},fl.nombre.slice(0,2).toUpperCase()),
-        h('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8',fontFamily:"'DM Sans',sans-serif"}},fl.nombre)
+        h('div',{style:{width:34,height:34,borderRadius:'50%',background:`${fl.color}20`,border:`2px solid ${fl.color}`,display:'flex',alignItems:'center',justifyContent:'center',fontSize:13,fontWeight:700,color:fl.color}},fl.nombre.slice(0,2).toUpperCase()),
+        h('span',{style:{fontSize:16,fontWeight:700,color:'#f0f4f8'}},fl.nombre)
       ),
       h('span',{style:{fontSize:11,padding:'3px 10px',borderRadius:20,background:gpsOn?`${fl.color}20`:'rgba(245,158,11,0.15)',color:gpsOn?fl.color:'#f59e0b',fontWeight:600}},gpsOn?'En línea':'Desconectado')
     ),
@@ -338,23 +275,30 @@ function PantallaFletero({fl,onBack}){
           border:`4px solid ${gpsOn?fl.color:'rgba(255,255,255,0.12)'}`,
           background:gpsOn?`${fl.color}15`:'rgba(255,255,255,0.03)',
           cursor:'pointer',display:'flex',flexDirection:'column',alignItems:'center',justifyContent:'center',gap:8,
-          position:'relative',zIndex:1,transition:'all .3s',fontFamily:"'DM Sans',sans-serif"
+          position:'relative',zIndex:1,transition:'all .3s'
         }},
           h('span',{style:{fontSize:52}},gpsOn?'📍':'🔌'),
-          h('span',{style:{fontSize:14,fontWeight:700,color:gpsOn?fl.color:'#94a3b8',fontFamily:"'DM Sans',sans-serif"}},gpsOn?'Activo':'Activar GPS')
+          h('span',{style:{fontSize:14,fontWeight:700,color:gpsOn?fl.color:'#94a3b8'}},gpsOn?'Activo':'Activar GPS')
         )
       ),
-      // Última posición
-      pos&&h('div',{style:{background:'#1e3148',border:`1px solid ${fl.color}30`,borderRadius:16,padding:'14px 20px',textAlign:'center',width:'100%',maxWidth:280,fontFamily:"'DM Sans',sans-serif"}},
-        h('div',{style:{fontSize:11,color:'#94a3b8',marginBottom:4}},'Última actualización'),
+      // Info
+      pos&&h('div',{style:{background:'#1e3148',border:`1px solid ${fl.color}30`,borderRadius:16,padding:'14px 20px',textAlign:'center',width:'100%',maxWidth:280}},
+        h('div',{style:{fontSize:11,color:'#94a3b8',marginBottom:4}},'GPS activo desde'),
         h('div',{style:{fontSize:20,fontWeight:700,color:'#f0f4f8'}},pos.hora),
-        h('div',{style:{fontSize:11,color:'#4a6080',marginTop:4}},pos.lat.toFixed(5)+', '+pos.lng.toFixed(5))
+        isNative()&&h('div',{style:{fontSize:12,color:fl.color,marginTop:6,fontWeight:600}},'✓ Funciona con pantalla apagada')
       ),
-      error&&h('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:12,padding:'12px 16px',fontSize:13,color:'#ef4444',textAlign:'center',maxWidth:300,fontFamily:"'DM Sans',sans-serif"}},error),
-      !gpsOn&&!error&&h('div',{style:{fontSize:13,color:'#4a6080',textAlign:'center',maxWidth:260,lineHeight:1.7,fontFamily:"'DM Sans',sans-serif"}},
+      error&&h('div',{style:{background:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.3)',borderRadius:12,padding:'14px 16px',fontSize:13,color:'#ef4444',textAlign:'center',maxWidth:300,lineHeight:1.6}},
+        h('div',{style:{fontSize:20,marginBottom:8}},'⚠️'),
+        error,
+        h('br'),
+        h('div',{style:{fontSize:11,color:'#94a3b8',marginTop:8}},'Configuración → Apps → FleteRuta → Permisos → Ubicación → Permitir todo el tiempo')
+      ),
+      !gpsOn&&!error&&h('div',{style:{fontSize:13,color:'#4a6080',textAlign:'center',maxWidth:260,lineHeight:1.7}},
         'Tocá el botón para activar el GPS.',
-        isNative ? h('span',{style:{color:'#00c896',display:'block',marginTop:6,fontWeight:600}},'✓ GPS funciona en segundo plano') : h('br'),
-        isNative ? 'Podés usar WhatsApp normalmente.' : 'La oficina te ve en el mapa al instante.'
+        h('br'),
+        isNative()
+          ?h('span',{style:{color:'#00c896',fontWeight:600}},'Funciona aunque uses WhatsApp.')
+          :'La oficina te ve en el mapa al instante.'
       )
     )
   );
