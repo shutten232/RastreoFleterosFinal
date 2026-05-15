@@ -75,16 +75,12 @@ const card={background:'#1e3148',border:'1px solid rgba(255,255,255,0.08)',borde
 // INICIO
 // ══════════════════════════════════════════════════════════════════════════════
 function Inicio({onSelect}){
-  const [pwaListo,setPwaListo]=useState(!!window._pwaReady);
-  useEffect(()=>{
-    window._pwaDispatch=()=>setPwaListo(!!window._pwaReady);
-    return()=>{window._pwaDispatch=null;};
-  },[]);
-  function instalar(){
-    if(!deferredPrompt)return;
-    deferredPrompt.prompt();
-    deferredPrompt.userChoice.then(()=>{deferredPrompt=null;setPwaListo(false);});
+  const [showInstall,setShowInstall]=useState(false);
+  function instalarNativo(){
+    if(deferredPrompt){deferredPrompt.prompt();deferredPrompt.userChoice.then(()=>{deferredPrompt=null;setShowInstall(false);});}
   }
+  const isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  const isAndroid=/android/i.test(navigator.userAgent);
   return e('div',{style:{...page,alignItems:'center',justifyContent:'center',padding:24}},
     e('div',{style:{textAlign:'center',marginBottom:44}},
       // QUIRGROUP Logo
@@ -98,8 +94,36 @@ function Inicio({onSelect}){
       e('div',{style:{fontSize:42,marginBottom:8}},'🚛'),
       e('div',{style:{fontSize:26,fontWeight:700,color:'#00c896',letterSpacing:'-0.5px',fontFamily:"'DM Sans',sans-serif"}},'FleteRuta'),
       e('div',{style:{fontSize:13,color:'#94a3b8',marginTop:6}},'Seguimiento GPS en tiempo real'),
-      // Botón instalar
-      pwaListo&&e('button',{onClick:instalar,style:{marginTop:18,padding:'10px 22px',background:'linear-gradient(135deg,#00c896,#0ea5e9)',color:'white',border:'none',borderRadius:12,fontSize:13,fontWeight:700,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:8,fontFamily:"'DM Sans',sans-serif",boxShadow:'0 4px 20px rgba(0,200,150,0.3)'}},'📲 Instalar en el celular')
+      // Botón instalar — siempre visible
+      e('button',{onClick:()=>setShowInstall(true),style:{marginTop:18,padding:'10px 22px',background:'linear-gradient(135deg,#00c896,#0ea5e9)',color:'white',border:'none',borderRadius:12,fontSize:13,fontWeight:700,cursor:'pointer',display:'inline-flex',alignItems:'center',gap:8,fontFamily:"'DM Sans',sans-serif",boxShadow:'0 4px 20px rgba(0,200,150,0.3)'}},'📲 Instalar en el celular')
+    ),
+    showInstall&&e('div',{style:{position:'fixed',inset:0,background:'rgba(0,0,0,0.75)',display:'flex',alignItems:'flex-end',zIndex:999,fontFamily:"'DM Sans',sans-serif"}},
+      e('div',{style:{background:'#1e3148',borderRadius:'24px 24px 0 0',padding:'28px 24px 44px',width:'100%',border:'1px solid rgba(255,255,255,0.1)'}},
+        e('div',{style:{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:20}},
+          e('div',{style:{fontSize:17,fontWeight:700,color:'#f0f4f8'}},'Instalar FleteRuta'),
+          e('button',{onClick:()=>setShowInstall(false),style:{background:'none',border:'none',color:'#94a3b8',fontSize:24,cursor:'pointer',lineHeight:1}},'×')
+        ),
+        // Android con prompt nativo
+        deferredPrompt&&e('button',{onClick:instalarNativo,style:{width:'100%',padding:'14px',background:'linear-gradient(135deg,#00c896,#0ea5e9)',color:'white',border:'none',borderRadius:14,fontSize:15,fontWeight:700,cursor:'pointer',marginBottom:16,fontFamily:"'DM Sans',sans-serif"}},'📲 Instalar ahora'),
+        // Instrucciones Android
+        isAndroid&&!deferredPrompt&&e('div',{style:{background:'rgba(0,200,150,0.08)',border:'1px solid rgba(0,200,150,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:12}},
+          e('div',{style:{fontSize:13,fontWeight:700,color:'#00c896',marginBottom:8}},'En Chrome Android:'),
+          ...['1. Tocá el menú ⋮ (tres puntos arriba a la derecha)','2. Tocá "Añadir a pantalla de inicio"','3. Confirmá tocando "Añadir"'].map((t,i)=>
+            e('div',{key:i,style:{fontSize:13,color:'#94a3b8',marginBottom:4,lineHeight:1.5}},t)
+          )
+        ),
+        // Instrucciones iPhone
+        isIOS&&e('div',{style:{background:'rgba(59,130,246,0.08)',border:'1px solid rgba(59,130,246,0.2)',borderRadius:14,padding:'14px 16px',marginBottom:12}},
+          e('div',{style:{fontSize:13,fontWeight:700,color:'#3b82f6',marginBottom:8}},'En Safari iPhone:'),
+          ...['1. Tocá el botón compartir □↑ (abajo al centro)','2. Deslizá y tocá "Añadir a pantalla de inicio"','3. Tocá "Añadir" arriba a la derecha'].map((t,i)=>
+            e('div',{key:i,style:{fontSize:13,color:'#94a3b8',marginBottom:4,lineHeight:1.5}},t)
+          )
+        ),
+        // Genérico desktop
+        !isAndroid&&!isIOS&&e('div',{style:{background:'rgba(255,255,255,0.04)',border:'1px solid rgba(255,255,255,0.1)',borderRadius:14,padding:'14px 16px'}},
+          e('div',{style:{fontSize:13,color:'#94a3b8',lineHeight:1.7}},'En Chrome: buscá el ícono 📥 en la barra de direcciones o menú → "Instalar FleteRuta"')
+        )
+      )
     ),
     e('div',{style:{display:'flex',flexDirection:'column',gap:12,width:'100%',maxWidth:320}},
       // Oficina
